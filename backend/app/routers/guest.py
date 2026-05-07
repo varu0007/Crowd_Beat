@@ -4,7 +4,7 @@ guest.py — 观众相关端点
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +57,7 @@ async def get_playlists(guest_id: str, db: AsyncSession = Depends(get_db)):
 async def submit_playlists(
     guest_id: str,
     payload: PlaylistSelection,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     try:
@@ -122,9 +123,11 @@ async def submit_playlists(
         db.add(guest_track)
 
     await db.flush()
+    await db.commit()
 
-    # 5. Trigger recommendation engine
-    await crowd_engine.on_guest_join(guest.session_id, guest.id, db)
+    # 5. Notify immediately, then generate recommendations after responding.
+    await crowd_engine.notify_guest_tracks_shared(guest.session_id, guest.id)
+    background_tasks.add_task(crowd_engine.recompute_and_broadcast, guest.session_id, guest.id)
 
     return {"ok": True, "tracks_analyzed": len(deduped_tracks)}
 
@@ -165,6 +168,7 @@ async def get_playlist_tracks(guest_id: str, playlist_id: str, db: AsyncSession 
 async def submit_tracks(
     guest_id: str,
     payload: TrackSelection,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """提交用户选择的具体歌曲进行分析"""
@@ -219,8 +223,10 @@ async def submit_tracks(
         db.add(guest_track)
 
     await db.flush()
+    await db.commit()
 
-    # 4. Trigger recommendation engine
-    await crowd_engine.on_guest_join(guest.session_id, guest.id, db)
+    # 4. Notify immediately, then generate recommendations after responding.
+    await crowd_engine.notify_guest_tracks_shared(guest.session_id, guest.id)
+    background_tasks.add_task(crowd_engine.recompute_and_broadcast, guest.session_id, guest.id)
 
     return {"ok": True, "tracks_analyzed": len(deduped_tracks)}

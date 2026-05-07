@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.database import get_session_factory
 from app.services import ml_engine
 
 
@@ -89,6 +90,42 @@ async def on_guest_join(
     })
 
     return recommendations
+
+
+async def notify_guest_tracks_shared(
+    session_id: uuid.UUID,
+    guest_id: uuid.UUID,
+) -> None:
+    """Notify dashboards that a guest shared tracks without blocking on ML."""
+    await broadcast(session_id, {
+        "type": "guest_joined",
+        "session_id": str(session_id),
+        "guest_id": str(guest_id),
+    })
+
+
+async def recompute_and_broadcast(
+    session_id: uuid.UUID,
+    guest_id: uuid.UUID,
+) -> None:
+    """Recompute recommendations in the background with its own DB session."""
+    print(f"[debug] background recompute called, session_id={session_id}")
+    factory = get_session_factory()
+    async with factory() as db:
+        try:
+            recommendations = await ml_engine.recompute(session_id, db)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            print(f"[crowd_engine] background recompute failed: {e}")
+            return
+
+    await broadcast(session_id, {
+        "type": "recommendations_update",
+        "session_id": str(session_id),
+        "guest_id": str(guest_id),
+        "recommendations": recommendations,
+    })
 
 
 def close_session(session_id: uuid.UUID) -> None:

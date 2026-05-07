@@ -33,36 +33,24 @@ export const api = {
     `${BASE}/auth/login?session_id=${sessionId}`,
 
   getGuestPlaylists: (guestId) =>
-    fetch(`${BASE}/guest/${guestId}/playlists`).then(r => {
-      if (!r.ok) throw new Error(r.statusText)
-      return r.json()
-    }),
+    fetch(`${BASE}/guest/${guestId}/playlists`).then(jsonOrThrow),
 
   submitPlaylists: (guestId, playlistIds) =>
     fetch(`${BASE}/guest/${guestId}/playlists`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ playlist_ids: playlistIds })
-    }).then(r => {
-      if (!r.ok) throw new Error(r.statusText)
-      return r.json()
-    }),
+    }).then(jsonOrThrow),
 
   getPlaylistTracks: (guestId, playlistId) =>
-    fetch(`${BASE}/guest/${guestId}/playlists/${playlistId}/tracks`).then(r => {
-      if (!r.ok) throw new Error(r.statusText)
-      return r.json()
-    }),
+    fetch(`${BASE}/guest/${guestId}/playlists/${playlistId}/tracks`).then(jsonOrThrow),
 
   submitTracks: (guestId, tracks) =>
     fetch(`${BASE}/guest/${guestId}/tracks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tracks })
-    }).then(r => {
-      if (!r.ok) throw new Error(r.statusText)
-      return r.json()
-    }),
+    }).then(jsonOrThrow),
 }
 
 export const adminApi = {
