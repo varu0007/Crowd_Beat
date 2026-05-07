@@ -80,7 +80,14 @@ async def recompute(
 
     # 2. 没数据返回 []
     if not rows:
-        return []
+        session_result = await db.execute(
+            select(DBSession).where(DBSession.id == session_id)
+        )
+        db_session = session_result.scalar_one_or_none()
+        if not db_session:
+            return []
+
+        return await _cold_start_fallback(session_id, db_session, db, 0, [])
 
     # 3. 统计 guest 数量，< 2 人走 cold_start_fallback
     guest_tracks_map = defaultdict(list)
