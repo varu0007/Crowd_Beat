@@ -1,7 +1,7 @@
 """
 ml_engine.py — 推荐算法引擎
 职责：
-  - 正常模式：使用 Groq API (LLaMA 3) 进行推荐
+  - 正常模式：使用 Gemini API 进行推荐
   - Cold start：host 预设 genre fallback
 """
 
@@ -9,14 +9,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 import json
-import os
 import re
 from collections import defaultdict
 
 import numpy as np
 from sqlalchemy import select, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from groq import Groq
+from google import genai
 from duckduckgo_search import DDGS
 
 from app.config import get_settings
@@ -27,6 +26,24 @@ from app.models.database import (
     Recommendation,
 )
 from app.services import spotify_service
+
+
+def _generate_with_gemini(prompt: str) -> str:
+    """Generate recommendation JSON with Gemini."""
+    settings = get_settings()
+    if not settings.GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY is not configured")
+
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model=settings.GEMINI_MODEL,
+        contents=prompt,
+        config={
+            "temperature": 0.7,
+            "max_output_tokens": 2000,
+        },
+    )
+    return response.text or ""
 
 
 def _fetch_internet_context(genre_str: str) -> str:
@@ -45,10 +62,9 @@ async def recompute(
     db: AsyncSession,
 ) -> list[dict]:
     """
-    使用 Groq API (LLaMA 3) 重新计算推荐列表。
+    使用 Gemini API 重新计算推荐列表。
     """
     print(f"[debug] recompute called, session_id={session_id}")
-    settings = get_settings()
 
     # 1. 查询该 session 所有 guest_tracks
     stmt = text("""
@@ -133,22 +149,11 @@ CRITICAL Recommendation Requirements:
 Return strictly in JSON format, do not include any other text:
 [{{ "track_name": "Song Name", "artist_name": "Artist Name", "reason": "Brief reason including release year" }}]"""
 
-    # 6. 调用 Groq
+    # 6. 调用 Gemini
     try:
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        print(f"[debug] GROQ_API_KEY starts with: {str(os.getenv('GROQ_API_KEY'))[:10]}")
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.7
-        )
-        response_text = response.choices[0].message.content
+        response_text = _generate_with_gemini(prompt)
     except Exception as e:
-        print(f"[Groq API Error] {e}")
+        print(f"[Gemini API Error] {e}")
         return []
 
     # 7. JSON 解析
@@ -220,12 +225,11 @@ async def _cold_start_fallback(
     existing_tracks: list[GuestTrack] = None,
 ) -> list[dict]:
     """
-    Cold start 处理 (Groq API 版本)：
+    Cold start 处理 (Gemini API 版本)：
     - 使用 host 预设的 genre_seeds
     - 如果有少量 guest tracks，提取一些歌曲名称作为上下文
-    - 调用 Groq API 生成推荐
+    - 调用 Gemini API 生成推荐
     """
-    settings = get_settings()
     genre_seeds = db_session.genre_seeds or []
     genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
     crowd_summary = ""
@@ -260,20 +264,9 @@ Return strictly in JSON format, do not include any other text:
 [{{ "track_name": "Song Name", "artist_name": "Artist Name", "reason": "Brief reason including release year" }}]"""
 
     try:
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        print(f"[debug] GROQ_API_KEY starts with: {str(os.getenv('GROQ_API_KEY'))[:10]}")
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.7
-        )
-        response_text = response.choices[0].message.content
+        response_text = _generate_with_gemini(prompt)
     except Exception as e:
-        print(f"[Groq API Error] Cold Start: {e}")
+        print(f"[Gemini API Error] Cold Start: {e}")
         return []
 
     try:
