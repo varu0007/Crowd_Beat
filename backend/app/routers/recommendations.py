@@ -119,7 +119,10 @@ async def refresh_recommendations(
         raise HTTPException(status_code=404, detail="Session not found or closed")
 
     # 重新计算推荐
-    recommendations = await ml_engine.recompute(sid, db)
+    try:
+        recommendations = await ml_engine.recompute(sid, db)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # WebSocket 广播
     await crowd_engine.broadcast(sid, {

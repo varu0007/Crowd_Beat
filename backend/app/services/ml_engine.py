@@ -41,6 +41,7 @@ def _generate_with_gemini(prompt: str) -> str:
         config={
             "temperature": 0.7,
             "max_output_tokens": 2000,
+            "response_mime_type": "application/json",
         },
     )
     return response.text or ""
@@ -154,7 +155,7 @@ Return strictly in JSON format, do not include any other text:
         response_text = _generate_with_gemini(prompt)
     except Exception as e:
         print(f"[Gemini API Error] {e}")
-        return []
+        raise RuntimeError(f"Gemini request failed: {e}") from e
 
     # 7. JSON 解析
     try:
@@ -166,13 +167,13 @@ Return strictly in JSON format, do not include any other text:
                 recommendations_data = json.loads(match.group(0))
             except json.JSONDecodeError:
                 print("[JSON Parse Error] fallback match failed.")
-                return []
+                raise ValueError("Gemini returned invalid recommendation JSON")
         else:
             print("[JSON Parse Error] Could not find JSON array.")
-            return []
+            raise ValueError("Gemini returned invalid recommendation JSON")
 
     if not isinstance(recommendations_data, list):
-        return []
+        raise ValueError("Gemini returned recommendation JSON that was not a list")
 
     # 取 top 20
     recommendations_data = recommendations_data[:20]
@@ -267,7 +268,7 @@ Return strictly in JSON format, do not include any other text:
         response_text = _generate_with_gemini(prompt)
     except Exception as e:
         print(f"[Gemini API Error] Cold Start: {e}")
-        return []
+        raise RuntimeError(f"Gemini request failed: {e}") from e
 
     try:
         recommendations_data = json.loads(response_text)
@@ -277,12 +278,12 @@ Return strictly in JSON format, do not include any other text:
             try:
                 recommendations_data = json.loads(match.group(0))
             except json.JSONDecodeError:
-                return []
+                raise ValueError("Gemini returned invalid recommendation JSON")
         else:
-            return []
+            raise ValueError("Gemini returned invalid recommendation JSON")
 
     if not isinstance(recommendations_data, list):
-        return []
+        raise ValueError("Gemini returned recommendation JSON that was not a list")
 
     top_n = []
     for i, rec in enumerate(recommendations_data[:20]):
