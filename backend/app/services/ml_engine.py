@@ -337,5 +337,5 @@ async def _save_recommendations(
             "is_cold_start": is_cold_start,
         })
 
-    await db.flush()
+    await db.commit()
     return results
