@@ -25,10 +25,6 @@ class Settings(BaseSettings):
     # --- Security ---
     SECRET_KEY: str = "change_me_to_a_random_string"
 
-    # --- ML Engine ---
-    GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
-
     # 推荐算法特征权重
     WEIGHT_DANCEABILITY: float = 0.25
     WEIGHT_ENERGY: float = 0.25

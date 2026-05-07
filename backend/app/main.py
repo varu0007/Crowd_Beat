@@ -18,7 +18,6 @@ from app.config import get_settings
 from app.models.database import init_db, close_db
 from app.routers import auth, session, recommendations, guest, admin
 from app.services import crowd_engine
-from google import genai
 from app.config import get_settings
 
 # ── Lifespan ──
@@ -128,23 +127,3 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 async def health_check():
     """健康检查端点"""
     return {"status": "ok", "service": "crowdbeat-api"}
-
-
-from google import genai
-from app.config import get_settings
-
-@app.get("/test-gemini")
-async def test_gemini():
-    settings = get_settings()
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
-
-    response = client.models.generate_content(
-        model=settings.GEMINI_MODEL,
-        contents="Return only this JSON: {\"status\":\"gemini working\"}",
-        config={
-            "response_mime_type": "application/json",
-            "max_output_tokens": 100,
-        },
-    )
-
-    return {"result": response.text}
