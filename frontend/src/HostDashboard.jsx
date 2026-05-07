@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useCrowdBeatWS } from './hooks/useCrowdBeatWS';
 import { api } from './api';
 import { useI18n } from './i18n';
@@ -21,6 +21,43 @@ export default function HostDashboard() {
 
   // Active session state
   const { recommendations, guestCount, isColdStart, isConnected } = useCrowdBeatWS(sessionId);
+
+  const clearSession = useCallback(() => {
+    setSessionId(null);
+    setSessionData(null);
+    setName('');
+    setSelectedGenres(new Set(['electronic']));
+    localStorage.removeItem('cb_session_id');
+    localStorage.removeItem('cb_session_data');
+  }, []);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    let cancelled = false;
+
+    const validateSession = async () => {
+      try {
+        const data = await api.getSession(sessionId);
+        if (cancelled) return;
+        setSessionData(data);
+        localStorage.setItem('cb_session_data', JSON.stringify(data));
+      } catch (err) {
+        if (cancelled) return;
+        if (err.message === 'Session not found') {
+          clearSession();
+        }
+      }
+    };
+
+    validateSession();
+    window.addEventListener('focus', validateSession);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', validateSession);
+    };
+  }, [sessionId, clearSession]);
 
   const toggleGenre = (g) => {
     const next = new Set(selectedGenres);
@@ -72,12 +109,7 @@ export default function HostDashboard() {
     if (window.confirm(t.confirmCloseSession)) {
       try {
         await api.closeSession(sessionId);
-        setSessionId(null);
-        setSessionData(null);
-        setName('');
-        setSelectedGenres(new Set(['electronic']));
-        localStorage.removeItem('cb_session_id');
-        localStorage.removeItem('cb_session_data');
+        clearSession();
       } catch (err) {
         alert(t.closeFailed(err.message));
       }
