@@ -1,7 +1,7 @@
 """
 ml_engine.py — 推荐算法引擎
 职责：
-  - 正常模式：使用 Groq API (LLaMA 3) 进行推荐
+  - 正常模式：使用 Gemini API 进行推荐
   - Cold start：host 预设 genre fallback
 """
 
@@ -9,14 +9,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 import json
-import os
 import re
 from collections import defaultdict
 
 import numpy as np
-from sqlalchemy import select, delete, text
+from sqlalchemy import select, delete, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from groq import Groq
+from google import genai
 from duckduckgo_search import DDGS
 
 from app.config import get_settings
@@ -27,6 +26,108 @@ from app.models.database import (
     Recommendation,
 )
 from app.services import spotify_service
+
+
+_RECOMMENDATION_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "track_name": {"type": "string"},
+            "artist_name": {"type": "string"},
+            "reason": {"type": "string"},
+        },
+        "required": ["track_name", "artist_name", "reason"],
+    },
+}
+
+
+def _generate_with_gemini(prompt: str) -> str:
+    """Generate recommendation JSON with Gemini."""
+    settings = get_settings()
+    if not settings.GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY is not configured")
+
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model=settings.GEMINI_MODEL,
+        contents=prompt,
+        config={
+            "temperature": 0.35,
+            "max_output_tokens": 2500,
+            "response_mime_type": "application/json",
+            "response_schema": _RECOMMENDATION_SCHEMA,
+        },
+    )
+    return response.text or ""
+
+
+def _extract_recommendations(response_text: str) -> list[dict]:
+    """Parse Gemini output from a raw list, wrapper object, or fenced block."""
+    cleaned = response_text.strip()
+    fence_match = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        cleaned = fence_match.group(1).strip()
+
+    candidates = [cleaned]
+    array_match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    if array_match:
+        candidates.append(array_match.group(0))
+    object_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if object_match:
+        candidates.append(object_match.group(0))
+
+    parsed = None
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+
+    if isinstance(parsed, dict):
+        for key in ("recommendations", "songs", "tracks", "items", "results"):
+            if isinstance(parsed.get(key), list):
+                parsed = parsed[key]
+                break
+
+    if not isinstance(parsed, list):
+        print(f"[JSON Parse Error] Gemini raw response: {response_text[:500]}")
+        raise ValueError("Gemini returned invalid recommendation JSON")
+
+    normalized = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+
+        track_name = (
+            item.get("track_name")
+            or item.get("track")
+            or item.get("song_name")
+            or item.get("song")
+            or item.get("title")
+            or item.get("name")
+        )
+        artist_name = (
+            item.get("artist_name")
+            or item.get("artist")
+            or item.get("artists")
+            or item.get("performer")
+        )
+        if isinstance(artist_name, list):
+            artist_name = ", ".join(str(artist) for artist in artist_name)
+
+        if track_name and artist_name:
+            normalized.append({
+                "track_name": str(track_name),
+                "artist_name": str(artist_name),
+                "reason": str(item.get("reason", "")),
+            })
+
+    if not normalized:
+        raise ValueError("Gemini returned no usable recommendations")
+
+    return normalized
 
 
 def _fetch_internet_context(genre_str: str) -> str:
@@ -45,7 +146,7 @@ async def recompute(
     db: AsyncSession,
 ) -> list[dict]:
     """
-    使用 Groq API (LLaMA 3) 重新计算推荐列表。
+    使用 Gemini API 重新计算推荐列表。
     """
     print(f"[debug] recompute called, session_id={session_id}")
 
@@ -60,9 +161,19 @@ async def recompute(
     rows = result.fetchall()
     print(f"[debug] found {len(rows)} tracks")
 
-    # 2. 没数据返回 []
     if not rows:
-        return []
+        session_result = await db.execute(
+            select(DBSession).where(DBSession.id == session_id)
+        )
+        db_session = session_result.scalar_one_or_none()
+        if not db_session:
+            return []
+
+        guest_count_result = await db.execute(
+            select(func.count()).where(Guest.session_id == session_id)
+        )
+        guest_count = guest_count_result.scalar() or 0
+        return await _cold_start_fallback(session_id, db_session, db, guest_count, [])
 
     # 3. 统计 guest 数量，< 2 人走 cold_start_fallback
     guest_tracks_map = defaultdict(list)
@@ -129,44 +240,18 @@ CRITICAL Recommendation Requirements:
 - Ensure the vibe is suitable for a live party atmosphere within the specific requested genres.
 - Do not repeat songs already submitted by the guests.
 
-Return strictly in JSON format, do not include any other text:
-[{{ "track_name": "Song Name", "artist_name": "Artist Name", "reason": "Brief reason including release year" }}]"""
+Return exactly 20 objects matching the configured JSON schema.
+Use the keys track_name, artist_name, and reason only."""
 
-    # 6. 调用 Groq
+    # 6. 调用 Gemini
     try:
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        print(f"[debug] GROQ_API_KEY starts with: {str(os.getenv('GROQ_API_KEY'))[:10]}")
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.7
-        )
-        response_text = response.choices[0].message.content
+        response_text = _generate_with_gemini(prompt)
     except Exception as e:
-        print(f"[Groq API Error] {e}")
-        return []
+        print(f"[Gemini API Error] {e}")
+        raise RuntimeError(f"Gemini request failed: {e}") from e
 
     # 7. JSON 解析
-    try:
-        recommendations_data = json.loads(response_text)
-    except json.JSONDecodeError:
-        match = re.search(r'\[.*\]', response_text, re.DOTALL)
-        if match:
-            try:
-                recommendations_data = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                print("[JSON Parse Error] fallback match failed.")
-                return []
-        else:
-            print("[JSON Parse Error] Could not find JSON array.")
-            return []
-
-    if not isinstance(recommendations_data, list):
-        return []
+    recommendations_data = _extract_recommendations(response_text)
 
     # 取 top 20
     recommendations_data = recommendations_data[:20]
@@ -219,10 +304,10 @@ async def _cold_start_fallback(
     existing_tracks: list[GuestTrack] = None,
 ) -> list[dict]:
     """
-    Cold start 处理 (Groq API 版本)：
+    Cold start 处理 (Gemini API 版本)：
     - 使用 host 预设的 genre_seeds
     - 如果有少量 guest tracks，提取一些歌曲名称作为上下文
-    - 调用 Groq API 生成推荐
+    - 调用 Gemini API 生成推荐
     """
     genre_seeds = db_session.genre_seeds or []
     genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
@@ -254,40 +339,16 @@ CRITICAL Requirements:
 - AVOID OUTDATED SONGS: Absolutely NO cliché, overplayed, or outdated "generic party" anthems.
 - Ensure the vibe is suitable for a live party atmosphere within the requested genre constraints.
 
-Return strictly in JSON format, do not include any other text:
-[{{ "track_name": "Song Name", "artist_name": "Artist Name", "reason": "Brief reason including release year" }}]"""
+Return exactly 20 objects matching the configured JSON schema.
+Use the keys track_name, artist_name, and reason only."""
 
     try:
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        print(f"[debug] GROQ_API_KEY starts with: {str(os.getenv('GROQ_API_KEY'))[:10]}")
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.7
-        )
-        response_text = response.choices[0].message.content
+        response_text = _generate_with_gemini(prompt)
     except Exception as e:
-        print(f"[Groq API Error] Cold Start: {e}")
-        return []
+        print(f"[Gemini API Error] Cold Start: {e}")
+        raise RuntimeError(f"Gemini request failed: {e}") from e
 
-    try:
-        recommendations_data = json.loads(response_text)
-    except json.JSONDecodeError:
-        match = re.search(r'\[.*\]', response_text, re.DOTALL)
-        if match:
-            try:
-                recommendations_data = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                return []
-        else:
-            return []
-
-    if not isinstance(recommendations_data, list):
-        return []
+    recommendations_data = _extract_recommendations(response_text)
 
     top_n = []
     for i, rec in enumerate(recommendations_data[:20]):
