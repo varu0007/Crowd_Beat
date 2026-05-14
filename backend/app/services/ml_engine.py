@@ -436,15 +436,19 @@ async def recompute(
     genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
 
     async def save_guest_track_fallback() -> list[dict]:
-        """Fallback: rank guest tracks by audio features when Gemini is unavailable."""
-        print("[recommendations] using guest-track fallback (audio-feature ranked)")
-        is_cold = guest_count < settings.COLD_START_THRESHOLD
+        """Fallback: use genre-seeded curated tracks when Gemini is unavailable.
+        
+        We intentionally do NOT return the guests' own submitted tracks here —
+        that would show users songs they already know and own.
+        """
+        print("[recommendations] using genre-seed fallback (Gemini unavailable)")
+        seeded = _genre_seed_recommendations(genre_seeds)
         return await _save_ranked_tracks(
             session_id=session_id,
-            top_n=_rank_guest_tracks(rows),
+            top_n=seeded,
             db=db,
             guest_count=guest_count,
-            is_cold_start=is_cold,
+            is_cold_start=True,
         )
 
     print(f"[debug] fetching internet context for {genre_str}...")
@@ -481,8 +485,8 @@ CRITICAL Recommendation Requirements:
 - TIME FRAME: Prefer songs released after 2020. Avoid songs older than 2015 unless they are absolute classics that still work in a party setting. Do NOT hallucinate release years. If you are unsure when a song was released, omit the year.
 - GENRE: The songs MUST strictly align with the DJ's set genres: {genre_str}.
 - AVOID OUTDATED SONGS: Absolutely NO cliche, overplayed, or outdated generic party anthems.
-- SONG MIX RATIO (5:5): You MUST provide exactly 10 songs total. Exactly 5 songs MUST be brand new hits (NOT from the guests' list). Exactly 5 songs MUST be selected directly from the guests' submitted tracks provided above (choose the ones that best fit the genre).
-- CRITICAL: The 5 songs in 'new_hits' MUST NOT be any song that appears in the guests' submitted tracks list above. new_hits are DJ-curated fresh discoveries ONLY. Cross-check every song in new_hits against the guest list before returning.
+- SONG MIX RATIO (5:5): You MUST provide exactly 10 songs total. Exactly 5 songs MUST be brand new hits (NOT from the guests' list). Exactly 5 songs in 'guest_picks' MUST be NEW songs inspired by the guests' musical taste — songs the guests would love but that DO NOT appear anywhere in their submitted tracks list above.
+- CRITICAL: NEITHER new_hits NOR guest_picks may contain any song that appears in the guests' submitted tracks list above. All 10 recommendations must be fresh discoveries the guests haven't already submitted.
 - IMPORTANT: There must be ZERO overlap between new_hits and guest_picks. Every song must appear exactly once across both lists combined.
 - Ensure the vibe is suitable for a live party atmosphere within the specific requested genres.
 
@@ -505,6 +509,28 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
 
     if not recommendations_data:
         return await save_guest_track_fallback()
+
+    # Build a set of guest-submitted (track, artist) pairs for deduplication.
+    # Even if Gemini ignores the prompt instructions, we enforce the rule in code.
+    submitted_keys = {
+        (row.track_name.strip().lower(), row.artist_name.strip().lower())
+        for row in rows
+        if row.track_name and row.artist_name
+    }
+
+    filtered_recommendations = []
+    for item in recommendations_data:
+        t = (item.get("track_name", "").strip().lower(), item.get("artist_name", "").strip().lower())
+        if t in submitted_keys:
+            print(f"[recommendations] filtered out guest-submitted track from results: {item.get('track_name')} - {item.get('artist_name')}")
+            continue
+        filtered_recommendations.append(item)
+
+    if not filtered_recommendations:
+        print("[recommendations] all LLM results were guest-submitted tracks, falling back")
+        return await save_guest_track_fallback()
+
+    recommendations_data = filtered_recommendations
 
     await db.execute(
         delete(Recommendation).where(Recommendation.session_id == session_id)
@@ -593,8 +619,8 @@ CRITICAL Requirements:
 - TIME FRAME: Prefer songs released after 2020. Avoid songs older than 2015 unless they are absolute classics that still work in a party setting. Do NOT hallucinate release years. If you are unsure when a song was released, omit the year.
 - GENRE: MUST be strictly of the {genre_str} style.
 - AVOID OUTDATED SONGS: Absolutely NO cliche, overplayed, or outdated generic party anthems.
-- SONG MIX RATIO (5:5): You MUST provide exactly 10 songs total. Exactly 5 songs MUST be brand new hits. Exactly 5 songs MUST be selected directly from the existing guests' tracks provided above (if any exist and fit the genre).
-- CRITICAL: The 5 songs in 'new_hits' MUST NOT be any song that appears in the guests' submitted tracks list above. new_hits are DJ-curated fresh discoveries ONLY. Cross-check every song in new_hits against the guest list before returning.
+- SONG MIX RATIO (5:5): You MUST provide exactly 10 songs total. Exactly 5 songs MUST be brand new hits. Exactly 5 songs in 'guest_picks' MUST be NEW songs inspired by the existing guests' musical taste — songs they would love but that DO NOT appear anywhere in their submitted tracks listed above.
+- CRITICAL: NEITHER new_hits NOR guest_picks may contain any song that appears in the guests' submitted tracks list above. All 10 recommendations must be fresh discoveries.
 - CRITICAL for new_hits: These MUST be songs that are NOT in the guest's submitted tracks. These are fresh DJ discoveries from the internet search context. Do NOT pick songs from the guest's list for new_hits under any circumstances.
 - IMPORTANT: There must be ZERO overlap between new_hits and guest_picks. Every song must appear exactly once across both lists combined.
 - Ensure the vibe is suitable for a live party atmosphere within the requested genre constraints.
