@@ -11,7 +11,6 @@ from collections import defaultdict
 import numpy as np
 from sqlalchemy import select, delete, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from google import genai
 
 from app.config import get_settings
 from app.models.database import (
@@ -54,6 +53,11 @@ def _generate_with_gemini(prompt: str) -> str:
     if not settings.GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY is not configured")
 
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise RuntimeError("google-genai is not installed") from exc
+
     client = genai.Client(api_key=settings.GEMINI_API_KEY)
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
@@ -65,7 +69,64 @@ def _generate_with_gemini(prompt: str) -> str:
             "response_schema": _RECOMMENDATION_SCHEMA,
         },
     )
+    parsed = getattr(response, "parsed", None)
+    if parsed is not None:
+        return json.dumps(parsed)
     return response.text or ""
+
+
+def _normalize_track(item: dict) -> dict | None:
+    track_name = (
+        item.get("track_name")
+        or item.get("track")
+        or item.get("title")
+        or item.get("name")
+        or item.get("song")
+    )
+    artist_name = (
+        item.get("artist_name")
+        or item.get("artist")
+        or item.get("artists")
+        or item.get("artistName")
+    )
+
+    if isinstance(artist_name, list):
+        artist_name = ", ".join(str(artist) for artist in artist_name)
+
+    if not track_name or not artist_name:
+        return None
+
+    return {
+        "track_name": str(track_name).strip(),
+        "artist_name": str(artist_name).strip(),
+        "reason": str(item.get("reason", "")),
+        "source": str(item.get("source", "new")).lower(),
+    }
+
+
+def _extract_recommendation_items(parsed_json) -> list[dict]:
+    if isinstance(parsed_json, list):
+        return [item for item in parsed_json if isinstance(item, dict)]
+
+    if not isinstance(parsed_json, dict):
+        return []
+
+    items: list[dict] = []
+    for source, key in (("new", "new_hits"), ("guest", "guest_picks")):
+        for item in parsed_json.get(key, []) or []:
+            if isinstance(item, dict):
+                item["source"] = source
+                items.append(item)
+
+    if items:
+        return items
+
+    for key in ("recommendations", "tracks", "songs", "items", "results"):
+        value = parsed_json.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+
+    return []
 
 
 def _parse_llm_recommendations(response_text: str) -> list[dict]:
@@ -85,24 +146,10 @@ def _parse_llm_recommendations(response_text: str) -> list[dict]:
         parsed_json = json.loads(match.group(0))
 
     recommendations_data = []
-    if isinstance(parsed_json, dict):
-        new_hits = parsed_json.get("new_hits", [])
-        guest_picks = parsed_json.get("guest_picks", [])
-
-        for item in new_hits[:5]:
-            if isinstance(item, dict):
-                item["source"] = "new"
-                recommendations_data.append(item)
-
-        for item in guest_picks[:5]:
-            if isinstance(item, dict):
-                item["source"] = "guest"
-                recommendations_data.append(item)
-    elif isinstance(parsed_json, list):
-        for item in parsed_json[:10]:
-            if isinstance(item, dict):
-                item["source"] = item.get("source", "new").lower()
-                recommendations_data.append(item)
+    for item in _extract_recommendation_items(parsed_json)[:10]:
+        normalized = _normalize_track(item)
+        if normalized:
+            recommendations_data.append(normalized)
 
     if not recommendations_data:
         raise ValueError("Gemini returned no usable recommendations")

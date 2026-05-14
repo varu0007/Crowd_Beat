@@ -14,6 +14,7 @@ from app.models.database import (
     GuestTrack,
     Recommendation,
 )
+from app.services import ml_engine
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -206,17 +207,51 @@ async def list_recommendations(
     db: AsyncSession = Depends(get_db),
 ):
     """Internal helper."""
-    stmt = select(Recommendation).order_by(Recommendation.rank.asc()).limit(100)
-
     if session_id:
         try:
             sid = uuid.UUID(session_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid session_id")
-        stmt = stmt.where(Recommendation.session_id == sid)
+        stmt = (
+            select(Recommendation)
+            .where(Recommendation.session_id == sid)
+            .order_by(Recommendation.rank.asc())
+            .limit(100)
+        )
 
-    result = await db.execute(stmt)
-    recs = result.scalars().all()
+        result = await db.execute(stmt)
+        recs = result.scalars().all()
+        if not recs:
+            session_result = await db.execute(
+                select(DBSession).where(DBSession.id == sid, DBSession.status == "active")
+            )
+            if session_result.scalar_one_or_none():
+                try:
+                    await ml_engine.recompute(sid, db)
+                except Exception as exc:
+                    print(f"[admin] recommendation recompute failed for {sid}: {exc}")
+                result = await db.execute(stmt)
+                recs = result.scalars().all()
+    else:
+        stmt = select(Recommendation).order_by(
+            Recommendation.generated_at.desc(),
+            Recommendation.rank.asc(),
+        ).limit(100)
+
+        result = await db.execute(stmt)
+        recs = result.scalars().all()
+        if not recs:
+            active_sessions_result = await db.execute(
+                select(DBSession.id).where(DBSession.status == "active").order_by(DBSession.created_at.desc()).limit(5)
+            )
+            active_session_ids = active_sessions_result.scalars().all()
+            for sid in active_session_ids:
+                try:
+                    await ml_engine.recompute(sid, db)
+                except Exception as exc:
+                    print(f"[admin] recommendation recompute failed for {sid}: {exc}")
+            result = await db.execute(stmt)
+            recs = result.scalars().all()
 
     return [
         {
