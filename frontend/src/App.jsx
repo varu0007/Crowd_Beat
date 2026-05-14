@@ -1,14 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import DatabaseView from './DatabaseView.jsx';
-import HostDashboard from './HostDashboard.jsx';
+
+import Home from './Home.jsx';
+import PartyLobby from './PartyLobby.jsx';
+import DJWorkstation from './DJWorkstation.jsx';
+import DisplayScreen from './DisplayScreen.jsx';
 import GuestEntry from './GuestEntry.jsx';
 import GuestSuccess from './GuestSuccess.jsx';
 import GuestPlaylistSelect from './GuestPlaylistSelect.jsx';
 import { addSongsBatch, spotifyTrackToSong, mergeAudioFeatures } from './db.js';
 import { useI18n } from './i18n.jsx';
+import { User, Disc, Loader2 } from 'lucide-react';
+import { API_BASE } from './api.js';
 
-// --- PKCE 辅助函数 ---
+// --- PKCE è¾…åŠ©å‡½æ•° ---
 const generateRandomString = (length) => {
   const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   const values = crypto.getRandomValues(new Uint8Array(length));
@@ -30,7 +36,7 @@ const base64encode = (input) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// --- 核心配置 ---
+// --- æ ¸å¿ƒé…ç½® ---
 const CLIENT_ID = '9ae008bbaf3345ebb6f947fbe22b8eb7';
 const REDIRECT_URI = 'http://127.0.0.1:8888/callback';
 const SCOPES = 'playlist-read-private playlist-read-collaborative user-library-read user-read-private';
@@ -50,7 +56,7 @@ function SpotifyFetcher() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 获取有效 Token (过期则使用 refresh_token 刷新)
+  // èŽ·å–æœ‰æ•ˆ Token (è¿‡æœŸåˆ™ä½¿ç”¨ refresh_token åˆ·æ–°)
   const getValidToken = async () => {
     let token = localStorage.getItem('spotify_access_token');
     const expiresAt = localStorage.getItem('spotify_token_expires_at');
@@ -74,7 +80,7 @@ function SpotifyFetcher() {
         const data = await response.json();
         token = data.access_token;
         const newExpiresAt = Date.now() + (data.expires_in * 1000);
-        
+
         setAccessToken(token);
         localStorage.setItem('spotify_access_token', token);
         localStorage.setItem('spotify_token_expires_at', newExpiresAt);
@@ -93,14 +99,14 @@ function SpotifyFetcher() {
     return token;
   };
 
-  // 页面加载逻辑
+  // é¡µé¢åŠ è½½é€»è¾‘
   useEffect(() => {
     const init = async () => {
       const urlParams = new URLSearchParams(window.location.search);
       const code = urlParams.get('code');
 
       if (code) {
-        // 同步清理地址栏的 code，防止 React 的多次渲染导致用旧 code 发送重复请求
+        // åŒæ­¥æ¸…ç†åœ°å€æ çš„ codeï¼Œé˜²æ­¢ React çš„å¤šæ¬¡æ¸²æŸ“å¯¼è‡´ç”¨æ—§ code å‘é€é‡å¤è¯·æ±‚
         navigate('/', { replace: true });
         await exchangeToken(code);
       } else {
@@ -114,11 +120,11 @@ function SpotifyFetcher() {
     init();
   }, []);
 
-  // 1. 初始化 Spotify 登录流程 (PKCE)
+  // 1. åˆå§‹åŒ– Spotify ç™»å½•æµç¨‹ (PKCE)
   const handleLogin = async () => {
     const codeVerifier = generateRandomString(64);
     window.localStorage.setItem('code_verifier', codeVerifier);
-    
+
     const hashed = await sha256(codeVerifier);
     const codeChallenge = base64encode(hashed);
 
@@ -136,7 +142,7 @@ function SpotifyFetcher() {
     window.location.href = authUrl.toString();
   };
 
-  // 2. 将 Auth Code 兑换为 Access Token
+  // 2. å°† Auth Code å…‘æ¢ä¸º Access Token
   const exchangeToken = async (code) => {
     const codeVerifier = localStorage.getItem('code_verifier');
     try {
@@ -159,7 +165,7 @@ function SpotifyFetcher() {
 
       const data = await JSON.parse(await response.text());
       const expiresAt = Date.now() + (data.expires_in * 1000);
-      
+
       setAccessToken(data.access_token);
       localStorage.setItem('spotify_access_token', data.access_token);
       localStorage.setItem('spotify_refresh_token', data.refresh_token);
@@ -168,19 +174,19 @@ function SpotifyFetcher() {
       await fetchMyPlaylists(data.access_token);
     } catch (err) {
       console.error(err);
-      setError(`OAuth 认证失败: ${err.message}`);
+      setError(`OAuth è®¤è¯å¤±è´¥: ${err.message}`);
     }
   };
 
-  // 3. 获取用户自己的歌单 (GET /v1/me/playlists)
+  // 3. èŽ·å–ç”¨æˆ·è‡ªå·±çš„æ­Œå• (GET /v1/me/playlists)
   const fetchMyPlaylists = async (token) => {
     if (!token) return;
     setLoading(true);
     setError('');
-    
+
     let allPlaylists = [];
     let nextUrl = 'https://api.spotify.com/v1/me/playlists?limit=50';
-    
+
     try {
       while (nextUrl) {
         const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
@@ -202,7 +208,7 @@ function SpotifyFetcher() {
         if (!response.ok) {
            throw new Error(`Spotify API Error ${response.status}: ${data?.error?.message || text.substring(0, 50)}`);
         }
-        
+
         allPlaylists = [...allPlaylists, ...data.items];
         setPlaylists(allPlaylists);
         nextUrl = data.next;
@@ -216,17 +222,17 @@ function SpotifyFetcher() {
     }
   };
 
-  // 4. 读取具体 Playlist 的歌曲数据
+  // 4. è¯»å–å…·ä½“ Playlist çš„æ­Œæ›²æ•°æ®
   const fetchPlaylistTracks = async (playlist) => {
     setActivePlaylist(playlist);
     const token = await getValidToken();
     if (!token) return setError('Session expired. Please log in again.');
-    
+
     setLoading(true);
     setError('');
     setTracks([]);
     setSaveResult('');
-    
+
     let allTracks = [];
     let nextUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/items?additional_types=track&limit=50`;
 
@@ -259,10 +265,10 @@ function SpotifyFetcher() {
         const validTracks = data.items
           .map(tObj => tObj.track || tObj.item || tObj) // Fallback for different API response structures
           .filter(track => track && track.name);
-          
+
         allTracks = [...allTracks, ...validTracks];
         setTracks(allTracks);
-        
+
         nextUrl = data.next;
         setProgressInfo(`Fetched ${allTracks.length} / ${data.total || '?'} tracks...`);
 
@@ -277,7 +283,7 @@ function SpotifyFetcher() {
     }
   };
 
-  // 5. 读取 Liked Songs (GET /v1/me/tracks)
+  // 5. è¯»å– Liked Songs (GET /v1/me/tracks)
   const fetchLikedSongs = async () => {
     setActivePlaylist({
       id: 'liked_songs',
@@ -287,12 +293,12 @@ function SpotifyFetcher() {
     });
     const token = await getValidToken();
     if (!token) return setError('Session expired. Please log in again.');
-    
+
     setLoading(true);
     setError('');
     setTracks([]);
     setSaveResult('');
-    
+
     let allTracks = [];
     let nextUrl = `https://api.spotify.com/v1/me/tracks?limit=50`;
 
@@ -325,10 +331,10 @@ function SpotifyFetcher() {
         const validTracks = data.items
           .map(tObj => tObj.track || tObj.item || tObj)
           .filter(track => track && track.name);
-          
+
         allTracks = [...allTracks, ...validTracks];
         setTracks(allTracks);
-        
+
         nextUrl = data.next;
         setProgressInfo(`Fetched ${allTracks.length} / ${data.total || '?'} tracks...`);
 
@@ -343,7 +349,7 @@ function SpotifyFetcher() {
     }
   };
 
-  // 6. 批量获取 Audio Features (每次最多100个ID)
+  // 6. æ‰¹é‡èŽ·å– Audio Features (æ¯æ¬¡æœ€å¤š100ä¸ªID)
   const fetchAudioFeaturesBatch = async (trackIds, token) => {
     const features = {};
     const batchSize = 100;
@@ -361,9 +367,9 @@ function SpotifyFetcher() {
         );
 
         if (response.status === 403) {
-          // Audio Features API 已弃用，新应用没有权限
+          // Audio Features API å·²å¼ƒç”¨ï¼Œæ–°åº”ç”¨æ²¡æœ‰æƒé™
           console.warn('Audio Features API access denied (deprecated). Skipping.');
-          setProgressInfo('Audio Features API 不可用 (已弃用)，跳过音频特征获取...');
+          setProgressInfo('Audio Features API ä¸å¯ç”¨ (å·²å¼ƒç”¨)ï¼Œè·³è¿‡éŸ³é¢‘ç‰¹å¾èŽ·å–...');
           await sleep(500);
           return features;
         }
@@ -406,12 +412,12 @@ function SpotifyFetcher() {
     try {
       const token = await getValidToken();
 
-      // Step 1: 转换基本元数据
+      // Step 1: è½¬æ¢åŸºæœ¬å…ƒæ•°æ®
       setProgressInfo('Step 1/3: Extracting track metadata...');
       const songs = tracks.map((t) => spotifyTrackToSong(t, activePlaylist.name, t._addedAt || ''));
       await sleep(200);
 
-      // Step 2: 尝试获取 Audio Features
+      // Step 2: å°è¯•èŽ·å– Audio Features
       setProgressInfo('Step 2/3: Fetching audio features...');
       let enrichedSongs = songs;
       if (token) {
@@ -427,13 +433,13 @@ function SpotifyFetcher() {
         }
       }
 
-      // Step 3: 保存到 IndexedDB
+      // Step 3: ä¿å­˜åˆ° IndexedDB
       setProgressInfo('Step 3/3: Saving to database...');
       const count = await addSongsBatch(enrichedSongs);
       setProgressInfo('');
-      setSaveResult(`✓ 已成功保存 ${count} 首歌曲到数据库！(含 ${Object.keys(enrichedSongs[0] || {}).length} 个元数据字段)`);
+      setSaveResult(`âœ“ å·²æˆåŠŸä¿å­˜ ${count} é¦–æ­Œæ›²åˆ°æ•°æ®åº“ï¼(å« ${Object.keys(enrichedSongs[0] || {}).length} ä¸ªå…ƒæ•°æ®å­—æ®µ)`);
     } catch (err) {
-      setSaveResult(`✗ 保存失败: ${err.message}`);
+      setSaveResult(`âœ— ä¿å­˜å¤±è´¥: ${err.message}`);
     } finally {
       setSavingToDB(false);
       setProgressInfo('');
@@ -482,7 +488,7 @@ function SpotifyFetcher() {
         }}>
           {t.fetcherTitle}
         </h1>
-        
+
         {!accessToken ? (
           <div>
             <p style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
@@ -496,7 +502,7 @@ function SpotifyFetcher() {
           <div>
             <div style={{ marginBottom: '20px', fontWeight: 'bold', color: '#00A859', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>{t.authenticated}</span>
-              <button 
+              <button
                 className="nb-btn nb-btn--small nb-btn--ghost"
                 onClick={() => {
                   localStorage.clear();
@@ -511,9 +517,9 @@ function SpotifyFetcher() {
               <div>
                 <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '15px' }}>{t.yourLibrary}</h2>
                 <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '10px' }}>
-                  
-                  {/* 特殊处理的 Liked Songs (我喜欢的音乐) */}
-                  <div 
+
+                  {/* ç‰¹æ®Šå¤„ç†çš„ Liked Songs (æˆ‘å–œæ¬¢çš„éŸ³ä¹) */}
+                  <div
                     className="nb-card nb-card--interactive"
                     style={{ padding: '15px', marginBottom: '10px', borderColor: '#00A859', backgroundColor: '#e6ffe6', cursor: 'pointer', boxShadow: '4px 4px 0 #000' }}
                     onClick={() => fetchLikedSongs()}
@@ -531,10 +537,10 @@ function SpotifyFetcher() {
                     </div>
                   </div>
 
-                  {/* 普通歌单 */}
+                  {/* æ™®é€šæ­Œå• */}
                   {playlists.map(pl => (
-                    <div 
-                      key={pl.id} 
+                    <div
+                      key={pl.id}
                       className="nb-card nb-card--interactive"
                       style={{ padding: '15px', marginBottom: '10px', cursor: 'pointer', boxShadow: '4px 4px 0 #000' }}
                       onClick={() => fetchPlaylistTracks(pl)}
@@ -555,11 +561,11 @@ function SpotifyFetcher() {
                 </div>
               </div>
             )}
-            
+
             {activePlaylist && (
                <div>
                  <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
-                   <button 
+                   <button
                       className="nb-btn nb-btn--ghost nb-btn--small"
                       onClick={() => {
                         setActivePlaylist(null);
@@ -595,18 +601,18 @@ function SpotifyFetcher() {
                      marginTop: '12px',
                      padding: '12px 18px',
                      border: '3px solid #000',
-                     backgroundColor: saveResult.startsWith('✓') ? '#d4f8d4' : '#fdd',
+                     backgroundColor: saveResult.startsWith('âœ“') ? '#d4f8d4' : '#fdd',
                      fontWeight: 'bold',
                      boxShadow: '3px 3px 0 #000',
                    }}>
                      {saveResult}
-                     {saveResult.startsWith('✓') && (
-                       <button 
+                     {saveResult.startsWith('âœ“') && (
+                       <button
                          className="nb-btn nb-btn--small nb-btn--ghost"
                          style={{ marginLeft: '12px' }}
                          onClick={() => navigate('/database')}
                        >
-                         前往数据库查看 →
+                         å‰å¾€æ•°æ®åº“æŸ¥çœ‹ â†’
                        </button>
                      )}
                    </div>
@@ -662,19 +668,19 @@ function SpotifyFetcher() {
                 alignItems: 'center',
               }}>
                 {track.album?.images?.[0]?.url && (
-                  <img 
-                    src={track.album.images[0].url} 
-                    alt="" 
+                  <img
+                    src={track.album.images[0].url}
+                    alt=""
                     style={{ width: '50px', height: '50px', border: '2px solid #000', objectFit: 'cover', flexShrink: 0 }}
                   />
                 )}
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: '900', fontSize: '1.1rem' }}>{track.name}</div>
                   <div style={{ fontSize: '0.9rem', color: '#555' }}>
-                    👤 {track.artists ? track.artists.map(a => a.name).join(', ') : 'Unknown Artist'}
+                    <User size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 4 }} /> {track.artists ? track.artists.map(a => a.name).join(', ') : 'Unknown Artist'}
                   </div>
                   <div style={{ fontSize: '0.9rem', color: '#777' }}>
-                    💿 {track.album ? track.album.name : (track.show ? track.show.name : 'Unknown Album')}
+                    <Disc size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 4 }} /> {track.album ? track.album.name : (track.show ? track.show.name : 'Unknown Album')}
                   </div>
                 </div>
               </div>
@@ -695,8 +701,14 @@ function CallbackHandler() {
     const code = urlParams.get('code');
     const state = urlParams.get('state'); // Need state for session mapping
     if (code) {
-      // 临时代理：前端收到 code 后，瞬间重定向给后端，欺骗 Spotify 的重定向校验
-      window.location.href = `http://localhost:8000/auth/callback?code=${code}&state=${state}`;
+      // Check if this is a DJ PKCE flow callback (legacy)
+      if (state && state.startsWith('dj_host')) {
+        // Legacy DJ PKCE flow â€” redirect to home
+        navigate('/', { replace: true });
+      } else {
+        // Guest flow: forward to backend
+        window.location.href = `${API_BASE}/auth/callback?code=${code}&state=${state}`;
+      }
     } else {
       navigate('/', { replace: true });
     }
@@ -705,7 +717,9 @@ function CallbackHandler() {
   return (
     <div className="page-container">
       <div className="nb-card" style={{ textAlign: 'center', padding: '60px' }}>
-        <div style={{ fontSize: '2rem', fontWeight: '900' }}>⏳</div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <Loader2 size={48} className="animate-spin" />
+        </div>
         <div style={{ fontWeight: '700', marginTop: '12px' }}>Authenticating...</div>
       </div>
     </div>
@@ -760,8 +774,11 @@ export default function App() {
 
       {/* Routes */}
       <Routes>
-        <Route path="/" element={<Navigate to="/host" replace />} />
-        <Route path="/host" element={<HostDashboard />} />
+        <Route path="/" element={<Home />} />
+        <Route path="/party/:sessionId" element={<PartyLobby />} />
+        <Route path="/dj/:sessionId" element={<DJWorkstation />} />
+        <Route path="/display/:sessionId" element={<DisplayScreen />} />
+
         <Route path="/join/:sessionId" element={<GuestEntry />} />
         <Route path="/guest-success" element={<GuestSuccess />} />
         <Route path="/guest/:guestId" element={<GuestPlaylistSelect />} />

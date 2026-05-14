@@ -1,15 +1,15 @@
 """
-recommendations.py — 推荐结果路由
-端点：
-  GET  /recommendations/{session_id}          → 获取当前推荐列表
-  POST /recommendations/{session_id}/refresh  → 手动刷新推荐
+recommendations.py â€” æŽ¨èç»“æžœè·¯ç”±
+ç«¯ç‚¹ï¼š
+  GET  /recommendations/{session_id}          â†’ èŽ·å–å½“å‰æŽ¨èåˆ—è¡¨
+  POST /recommendations/{session_id}/refresh  â†’ æ‰‹åŠ¨åˆ·æ–°æŽ¨è
 """
 
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import get_db, Recommendation, Session as DBSession
@@ -18,7 +18,7 @@ from app.services import ml_engine, crowd_engine
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
-# ── Response Schemas ──
+# â”€â”€ Response Schemas â”€â”€
 
 class RecommendationItem(BaseModel):
     spotify_track_id: str
@@ -39,27 +39,27 @@ class RecommendationsResponse(BaseModel):
     recommendations: list[RecommendationItem]
 
 
-# ── Endpoints ──
+# â”€â”€ Endpoints â”€â”€
 
 @router.get("/{session_id}", response_model=RecommendationsResponse)
 async def get_recommendations(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """获取指定 session 的当前推荐列表"""
+    """èŽ·å–æŒ‡å®š session çš„å½“å‰æŽ¨èåˆ—è¡¨"""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
-    # 验证 session 存在
+    # éªŒè¯ session å­˜åœ¨
     session_result = await db.execute(
         select(DBSession).where(DBSession.id == sid)
     )
     if not session_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # 查询推荐
+    # æŸ¥è¯¢æŽ¨è
     result = await db.execute(
         select(Recommendation)
         .where(Recommendation.session_id == sid)
@@ -88,10 +88,16 @@ async def get_recommendations(
         for r in recs
     ]
 
+    # æŸ¥è¯¢çœŸå®ž guest æ•°é‡
+    guest_count_result = await db.execute(text(
+        "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
+    ), {"session_id": sid})
+    real_guest_count = guest_count_result.scalar() or 0
+
     return RecommendationsResponse(
         session_id=session_id,
         count=len(items),
-        guest_count=recs[0].guest_count if recs else 0,
+        guest_count=real_guest_count,
         is_cold_start=recs[0].is_cold_start if recs else False,
         recommendations=items,
     )
@@ -102,13 +108,13 @@ async def refresh_recommendations(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """DJ 手动触发推荐刷新"""
+    """DJ æ‰‹åŠ¨è§¦å‘æŽ¨èåˆ·æ–°"""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
-    # 验证 session 存在且活跃
+    # éªŒè¯ session å­˜åœ¨ä¸”æ´»è·ƒ
     session_result = await db.execute(
         select(DBSession).where(
             DBSession.id == sid,
@@ -118,13 +124,13 @@ async def refresh_recommendations(
     if not session_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Session not found or closed")
 
-    # 重新计算推荐
+    # é‡æ–°è®¡ç®—æŽ¨è
     try:
         recommendations = await ml_engine.recompute(sid, db)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # WebSocket 广播
+    # WebSocket å¹¿æ’­
     await crowd_engine.broadcast(sid, {
         "type": "recommendations_update",
         "session_id": session_id,
@@ -145,10 +151,16 @@ async def refresh_recommendations(
         for r in recommendations
     ]
 
+    # æŸ¥è¯¢çœŸå®ž guest æ•°é‡
+    guest_count_result = await db.execute(text(
+        "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
+    ), {"session_id": sid})
+    real_guest_count = guest_count_result.scalar() or 0
+
     return RecommendationsResponse(
         session_id=session_id,
         count=len(items),
-        guest_count=0,
+        guest_count=real_guest_count,
         is_cold_start=is_cold,
         recommendations=items,
     )

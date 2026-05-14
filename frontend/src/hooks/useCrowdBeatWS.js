@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { api, WS_BASE } from '../api'
 
 export function useCrowdBeatWS(sessionId) {
   const [recommendations, setRecommendations] = useState([])
@@ -11,29 +12,8 @@ export function useCrowdBeatWS(sessionId) {
 
   const connect = useCallback(() => {
     if (!sessionId) return
-
-    // Normalize WS base URL.
-    // Users often configure VITE_WS_URL as http(s)://... which browsers reject for WebSocket.
-    const configured = import.meta.env.VITE_WS_URL
-    let wsBase = configured
-
-    if (!wsBase) {
-      // Fallback: derive from VITE_API_URL if present.
-      // Example: VITE_API_URL=http://localhost:8000 => wsBase=ws://localhost:8000
-      const apiBase = import.meta.env.VITE_API_URL
-      if (apiBase) {
-        wsBase = apiBase
-      }
-    }
-
-    if (!wsBase) return
-
-    wsBase = wsBase.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://')
-    // Ensure we don't accidentally double-append when wsBase already ends with /ws
-    const trimmed = wsBase.endsWith('/ws') ? wsBase.slice(0, -3) : wsBase
-    const ws = new WebSocket(`${trimmed}/ws/${sessionId}`)
+    const ws = new WebSocket(`${WS_BASE}/ws/${sessionId}`);
     wsRef.current = ws
-
 
     ws.onopen = () => { setIsConnected(true); retryRef.current = 0 }
     ws.onclose = () => {
@@ -49,12 +29,12 @@ export function useCrowdBeatWS(sessionId) {
       if (msg.type === 'recommendations_update') {
         const recs = msg.recommendations ?? []
         setRecommendations(recs)
-        // guest_count 和 is_cold_start 嵌在每条推荐记录里
+        // guest_count å’Œ is_cold_start åµŒåœ¨æ¯æ¡æŽ¨èè®°å½•é‡Œ
         if (recs.length > 0) {
           setIsColdStart(recs[0].is_cold_start ?? false)
         }
       } else if (msg.type === 'guest_joined') {
-        // 后端不发 guest_count，前端自增
+        // åŽç«¯ä¸å‘ guest_countï¼Œå‰ç«¯è‡ªå¢ž
         setGuestCount(prev => prev + 1)
       } else if (msg.type === 'session_closed') {
         setRecommendations([])
@@ -66,9 +46,19 @@ export function useCrowdBeatWS(sessionId) {
 
   useEffect(() => {
     if (!sessionId) return
+
+    // Fetch initial state
+    api.getRecommendations(sessionId)
+      .then(data => {
+        setRecommendations(data.recommendations ?? [])
+        setGuestCount(data.guest_count ?? 0)
+        setIsColdStart(data.is_cold_start ?? false)
+      })
+      .catch(console.error)
+
     connect()
     return () => {
-      retryRef.current = MAX_RETRY  // 阻止 cleanup 后继续重连
+      retryRef.current = MAX_RETRY  // é˜»æ­¢ cleanup åŽç»§ç»­é‡è¿ž
       wsRef.current?.close()
     }
   }, [sessionId, connect])

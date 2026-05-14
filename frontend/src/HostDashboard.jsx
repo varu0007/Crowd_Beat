@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useCrowdBeatWS } from './hooks/useCrowdBeatWS';
-import { api } from './api';
+import { api, API_BASE } from './api';
 import { useI18n } from './i18n';
 
 const PRESET_GENRES = ['electronic', 'house', 'hip-hop', 'pop', 'rock', 'jazz', 'r-n-b', 'dance', 'k-pop', 'classical', 'country', 'metal', 'indie', 'soul', 'reggae', 'latin'];
@@ -116,7 +116,7 @@ export default function HostDashboard() {
     }
   };
 
-  // === 状态一：未创建场次 ===
+  // === çŠ¶æ€ä¸€ï¼šæœªåˆ›å»ºåœºæ¬¡ ===
   if (!sessionId) {
     return (
       <div className="page-container">
@@ -126,9 +126,9 @@ export default function HostDashboard() {
           <form onSubmit={handleCreate}>
             <div className="form-group">
               <label className="form-label">{t.sessionName}</label>
-              <input 
-                className="nb-input" 
-                placeholder={t.partyTonight} 
+              <input
+                className="nb-input"
+                placeholder={t.partyTonight}
                 value={name}
                 onChange={e => setName(e.target.value)}
               />
@@ -173,19 +173,19 @@ export default function HostDashboard() {
     );
   }
 
-  // === 状态二：已创建场次 ===
+  // === çŠ¶æ€äºŒï¼šå·²åˆ›å»ºåœºæ¬¡ ===
   return (
     <div className="page-container" style={{ display: 'flex', gap: 40, flexWrap: 'wrap' }}>
-      {/* 左列：状态与控制 */}
+      {/* å·¦åˆ—ï¼šçŠ¶æ€ä¸ŽæŽ§åˆ¶ */}
       <div style={{ flex: '1 1 300px', maxWidth: 400 }}>
         <div className="nb-card" style={{ textAlign: 'center' }}>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: 20, textTransform: 'uppercase' }}>{sessionData?.name || t.partyOngoing}</h2>
-          
+
           <div style={{ border: '4px solid #000', padding: 20, backgroundColor: '#fff', marginBottom: 12, display: 'inline-block', boxShadow: '6px 6px 0 #000' }}>
-            <img 
-              src={`${import.meta.env.VITE_API_URL}/host/session/${sessionId}/qr`} 
-              alt="QR Code" 
-              style={{ width: '100%', maxWidth: 200, display: 'block', margin: '0 auto' }} 
+            <img
+              src={`${API_BASE}/host/session/${sessionId}/qr`}
+              alt="QR Code"
+              style={{ width: '100%', maxWidth: 200, display: 'block', margin: '0 auto' }}
             />
           </div>
           <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#555', wordBreak: 'break-all', marginBottom: 30 }}>
@@ -213,7 +213,7 @@ export default function HostDashboard() {
         </div>
       </div>
 
-      {/* 右列：推荐列表 */}
+      {/* å³åˆ—ï¼šæŽ¨èåˆ—è¡¨ */}
       <div style={{ flex: '2 1 500px' }}>
         <div className="nb-card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '24px 30px', borderBottom: '4px solid #000', backgroundColor: '#1a1a1a', color: '#FFE600', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -224,26 +224,26 @@ export default function HostDashboard() {
               </span>
             )}
           </div>
-          
+
           <div style={{ padding: 30 }}>
             {recommendations.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">🎧</div>
+                <div className="empty-icon">ðŸŽ§</div>
                 <div className="empty-title">{t.waitingForGuests}</div>
                 <div className="empty-desc">{t.waitingForGuestsDesc}</div>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {recommendations.slice(0, 20).map((track, index) => (
-                  <div 
-                    key={track.spotify_track_id} 
-                    style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: 16, 
-                      padding: '12px 16px', 
-                      border: '3px solid #000', 
-                      backgroundColor: '#fff', 
+                  <div
+                    key={track.spotify_track_id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 16,
+                      padding: '12px 16px',
+                      border: '3px solid #000',
+                      backgroundColor: '#fff',
                       boxShadow: '4px 4px 0 #000',
                       transition: 'all 0.3s ease',
                       animation: 'slideUp 0.3s ease-out'

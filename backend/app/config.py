@@ -1,6 +1,6 @@
 """
-config.py — 应用配置
-使用 pydantic-settings 从 .env 文件加载环境变量
+config.py â€” åº”ç”¨é…ç½®
+ä½¿ç”¨ pydantic-settings ä»Ž .env æ–‡ä»¶åŠ è½½çŽ¯å¢ƒå˜é‡
 """
 
 from pydantic_settings import BaseSettings
@@ -9,7 +9,7 @@ import os
 
 
 class Settings(BaseSettings):
-    """CrowdBeat 全局配置"""
+    """CrowdBeat å…¨å±€é…ç½®"""
 
     # --- Spotify OAuth ---
     SPOTIFY_CLIENT_ID: str
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
 
-    # 推荐算法特征权重
+    # æŽ¨èç®—æ³•ç‰¹å¾æƒé‡
     WEIGHT_DANCEABILITY: float = 0.25
     WEIGHT_ENERGY: float = 0.25
     WEIGHT_VALENCE: float = 0.20
@@ -37,10 +37,10 @@ class Settings(BaseSettings):
     WEIGHT_ACOUSTICNESS: float = 0.10
     WEIGHT_INSTRUMENTALNESS: float = 0.05
 
-    # Cold start 阈值
+    # Cold start é˜ˆå€¼
     COLD_START_THRESHOLD: int = 5
 
-    # 推荐返回数量
+    # æŽ¨èè¿”å›žæ•°é‡
     RECOMMENDATION_LIMIT: int = 20
 
     model_config = {
@@ -52,5 +52,5 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """缓存的 Settings 实例，全局单例"""
+    """ç¼“å­˜çš„ Settings å®žä¾‹ï¼Œå…¨å±€å•ä¾‹"""
     return Settings()

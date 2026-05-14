@@ -1,8 +1,8 @@
 """
-ml_engine.py — 推荐算法引擎
-职责：
-  - 正常模式：使用 Gemini API 进行推荐
-  - Cold start：host 预设 genre fallback
+ml_engine.py â€” æŽ¨èç®—æ³•å¼•æ“Ž
+èŒè´£ï¼š
+  - æ­£å¸¸æ¨¡å¼ï¼šä½¿ç”¨ Gemini API è¿›è¡ŒæŽ¨è
+  - Cold startï¼šhost é¢„è®¾ genre fallback
 """
 
 import uuid
@@ -16,7 +16,6 @@ import numpy as np
 from sqlalchemy import select, delete, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from google import genai
-from duckduckgo_search import DDGS
 
 from app.config import get_settings
 from app.models.database import (
@@ -28,22 +27,33 @@ from app.models.database import (
 from app.services import spotify_service
 
 
-_RECOMMENDATION_SCHEMA = {
-    "type": "array",
-    "items": {
-        "type": "object",
-        "properties": {
-            "track_name": {"type": "string"},
-            "artist_name": {"type": "string"},
-            "reason": {"type": "string"},
-        },
-        "required": ["track_name", "artist_name", "reason"],
+_TRACK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "track_name": {"type": "string"},
+        "artist_name": {"type": "string"},
+        "reason": {"type": "string"},
     },
+    "required": ["track_name", "artist_name", "reason"],
+}
+
+_RECOMMENDATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "new_hits": {
+            "type": "array",
+            "items": _TRACK_SCHEMA,
+        },
+        "guest_picks": {
+            "type": "array",
+            "items": _TRACK_SCHEMA,
+        },
+    },
+    "required": ["new_hits", "guest_picks"],
 }
 
 
 def _generate_with_gemini(prompt: str) -> str:
-    """Generate recommendation JSON with Gemini."""
     settings = get_settings()
     if not settings.GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY is not configured")
@@ -62,81 +72,61 @@ def _generate_with_gemini(prompt: str) -> str:
     return response.text or ""
 
 
-def _extract_recommendations(response_text: str) -> list[dict]:
-    """Parse Gemini output from a raw list, wrapper object, or fenced block."""
+def _parse_llm_recommendations(response_text: str) -> list[dict]:
     cleaned = response_text.strip()
     fence_match = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL | re.IGNORECASE)
     if fence_match:
         cleaned = fence_match.group(1).strip()
 
-    candidates = [cleaned]
-    array_match = re.search(r"\[.*\]", cleaned, re.DOTALL)
-    if array_match:
-        candidates.append(array_match.group(0))
-    object_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if object_match:
-        candidates.append(object_match.group(0))
+    try:
+        parsed_json = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+        if not match:
+            match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+        if not match:
+            raise ValueError("Gemini returned invalid recommendation JSON")
+        parsed_json = json.loads(match.group(0))
 
-    parsed = None
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-            break
-        except json.JSONDecodeError:
-            continue
+    recommendations_data = []
+    if isinstance(parsed_json, dict):
+        new_hits = parsed_json.get("new_hits", [])
+        guest_picks = parsed_json.get("guest_picks", [])
 
-    if isinstance(parsed, dict):
-        for key in ("recommendations", "songs", "tracks", "items", "results"):
-            if isinstance(parsed.get(key), list):
-                parsed = parsed[key]
-                break
+        for item in new_hits[:5]:
+            if isinstance(item, dict):
+                item["source"] = "new"
+                recommendations_data.append(item)
 
-    if not isinstance(parsed, list):
-        print(f"[JSON Parse Error] Gemini raw response: {response_text[:500]}")
-        raise ValueError("Gemini returned invalid recommendation JSON")
+        for item in guest_picks[:5]:
+            if isinstance(item, dict):
+                item["source"] = "guest"
+                recommendations_data.append(item)
+    elif isinstance(parsed_json, list):
+        for item in parsed_json[:10]:
+            if isinstance(item, dict):
+                item["source"] = item.get("source", "new").lower()
+                recommendations_data.append(item)
 
-    normalized = []
-    for item in parsed:
-        if not isinstance(item, dict):
-            continue
-
-        track_name = (
-            item.get("track_name")
-            or item.get("track")
-            or item.get("song_name")
-            or item.get("song")
-            or item.get("title")
-            or item.get("name")
-        )
-        artist_name = (
-            item.get("artist_name")
-            or item.get("artist")
-            or item.get("artists")
-            or item.get("performer")
-        )
-        if isinstance(artist_name, list):
-            artist_name = ", ".join(str(artist) for artist in artist_name)
-
-        if track_name and artist_name:
-            normalized.append({
-                "track_name": str(track_name),
-                "artist_name": str(artist_name),
-                "reason": str(item.get("reason", "")),
-            })
-
-    if not normalized:
+    if not recommendations_data:
         raise ValueError("Gemini returned no usable recommendations")
 
-    return normalized
+    return recommendations_data
 
 
 def _fetch_internet_context(genre_str: str) -> str:
-    """使用 DuckDuckGo 搜索最新的流行曲目，给大模型补充知识盲区。"""
+    """ä½¿ç”¨ DuckDuckGo æœç´¢æœ€æ–°çš„æµè¡Œæ›²ç›®ï¼Œç»™å¤§æ¨¡åž‹è¡¥å……çŸ¥è¯†ç›²åŒºã€‚"""
     try:
-        results = DDGS().text(f"top {genre_str} hit singles tracks 2024 2025 2026", max_results=10)
+        from ddgs import DDGS
+        results = DDGS().text(
+            f"trending {genre_str} artists 2024 2025 who are popular now",
+            max_results=8
+        )
         if results:
-            context = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
-            return context
+            # åªå–æ ‡é¢˜ï¼Œbody é‡Œçš„ä¿¡æ¯è´¨é‡å¤ªå·®å®¹æ˜“å¼•å…¥æ®‹ç¼ºæ•°æ®
+            context = "\n".join([f"- {r['title']}" for r in results])
+            print(f"[debug] internet context preview: {context[:300]}")
+            return context[:1000]
     except Exception as e:
         print(f"[Internet Search Error] {e}")
     return "No internet context available."
@@ -146,11 +136,23 @@ async def recompute(
     db: AsyncSession,
 ) -> list[dict]:
     """
-    使用 Gemini API 重新计算推荐列表。
+    ä½¿ç”¨ Gemini API é‡æ–°è®¡ç®—æŽ¨èåˆ—è¡¨ã€‚
     """
     print(f"[debug] recompute called, session_id={session_id}")
+    settings = get_settings()
 
-    # 1. 查询该 session 所有 guest_tracks
+    # Fetch already added playlist tracks to exclude them from recommendations
+    playlist_stmt = text("""
+        SELECT track_name, artist_name
+        FROM playlist_tracks
+        WHERE session_id = :session_id
+    """)
+    playlist_result = await db.execute(playlist_stmt, {"session_id": session_id})
+    playlist_rows = playlist_result.fetchall()
+    already_added_strs = [f"{r.track_name} - {r.artist_name}" for r in playlist_rows]
+    already_added_text = "\n".join(already_added_strs) if already_added_strs else "None"
+
+    # 1. æŸ¥è¯¢è¯¥ session æ‰€æœ‰ guest_tracks
     stmt = text("""
         SELECT gt.track_name, gt.artist_name, gt.popularity, g.display_name
         FROM guest_tracks gt
@@ -173,9 +175,9 @@ async def recompute(
             select(func.count()).where(Guest.session_id == session_id)
         )
         guest_count = guest_count_result.scalar() or 0
-        return await _cold_start_fallback(session_id, db_session, db, guest_count, [])
+        return await _cold_start_fallback(session_id, db_session, db, guest_count, [], already_added_text)
 
-    # 3. 统计 guest 数量，< 2 人走 cold_start_fallback
+    # 3. ç»Ÿè®¡ guest æ•°é‡ï¼Œ< 2 äººèµ° cold_start_fallback
     guest_tracks_map = defaultdict(list)
     for row in rows:
         guest_tracks_map[row.display_name].append({
@@ -183,23 +185,28 @@ async def recompute(
             "artist": row.artist_name
         })
 
-    guest_count = len(guest_tracks_map)
+    # ç»Ÿè®¡çœŸå®ž guest æ•°é‡ï¼ˆåŒ…æ‹¬æ²¡æäº¤æ­Œæ›²çš„ guestï¼‰
+    guest_count_result = await db.execute(text(
+        "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
+    ), {"session_id": session_id})
+    guest_count = guest_count_result.scalar() or 0
     print(f"[debug] guest_count={guest_count}")
-    if guest_count < 2:
+    print(f"[debug] real guest_count from DB = {guest_count}")
+    if len(guest_tracks_map) == 0:
         session_result = await db.execute(
             select(DBSession).where(DBSession.id == session_id)
         )
         db_session = session_result.scalar_one_or_none()
         if not db_session:
             return []
-            
+
         tracks_result = await db.execute(
             select(GuestTrack).join(Guest, GuestTrack.guest_id == Guest.id).where(Guest.session_id == session_id)
         )
         all_tracks = tracks_result.scalars().all()
-        return await _cold_start_fallback(session_id, db_session, db, guest_count, all_tracks)
+        return await _cold_start_fallback(session_id, db_session, db, guest_count, all_tracks, already_added_text)
 
-    # 4. 按 guest 分组整理歌曲，每人最多取 10 首
+    # 4. æŒ‰ guest åˆ†ç»„æ•´ç†æ­Œæ›²ï¼Œæ¯äººæœ€å¤šå– 10 é¦–
     guest_lines = []
     for guest_name, tracks in guest_tracks_map.items():
         limited_tracks = tracks[:10]
@@ -223,52 +230,67 @@ async def recompute(
 
 DJ's strictly set party genre(s): {genre_str}
 
-LATEST INTERNET SEARCH CONTEXT (Use this to find brand new songs!):
+TRENDING ARTISTS CONTEXT (use these artist names as inspiration for who to recommend):
 {internet_context}
+
+Use this to identify which artists are currently popular in {genre_str}.
+Then recommend real songs by these artists that you know with certainty exist.
 
 Guests' musical tastes (for reference only, NEVER use this to break the DJ's genre rules):
 {guest_info_str}
 
-Please recommend exactly 20 songs suitable for the current party.
+ALREADY ADDED TO PLAYLIST (CRITICAL: DO NOT RECOMMEND THESE SONGS AGAIN):
+{already_added_text}
+
+Please recommend exactly 10 songs suitable for the current party.
 CRITICAL Recommendation Requirements:
 - NO HALLUCINATIONS / REAL SINGLES ONLY: You MUST recommend verified, real, individual song tracks. Do NOT recommend compilation albums, generic genre labels, or playlist titles.
 - DO NOT INVENT SONGS: If the internet context does not contain enough clear, unambiguous song names, IGNORE THE CONTEXT and use your own pre-trained knowledge. NEVER invent song titles or use placeholders like "New Artist".
 - DO NOT SPLIT ALBUM NAMES: Do NOT hallucinate fake song titles by splitting an album name or using a record label name as an artist (e.g., "Snatch! Records" is not an artist).
-- TIME FRAME: MUST be extremely recent, released within the last 2-3 years maximum (2024-2026). Do NOT recommend songs older than 2023.
+- TIME FRAME: Prefer songs released after 2020. Avoid songs older than 2015 unless they are absolute classics that still work in a party setting. Do NOT hallucinate release years â€” if you are unsure when a song was released, just omit the year.
 - GENRE: The songs MUST strictly align with the DJ's set genres: {genre_str}.
-- AVOID OUTDATED SONGS: Absolutely NO cliché, overplayed, or outdated "generic party" anthems (e.g., do not recommend "Sandstorm" or "Macarena").
+- AVOID OUTDATED SONGS: Absolutely NO clichÃ©, overplayed, or outdated "generic party" anthems (e.g., do not recommend "Sandstorm" or "Macarena").
+- SONG MIX RATIO (5:5): You MUST provide exactly 10 songs total. Exactly 5 songs MUST be brand new hits (NOT from the guests' list). Exactly 5 songs MUST be selected directly from the guests' submitted tracks provided above (choose the ones that best fit the genre).
+- CRITICAL: The 5 songs in 'new_hits' MUST NOT be any song that appears in the guests' submitted tracks list above. new_hits are DJ-curated fresh discoveries ONLY. Cross-check every song in new_hits against the guest list before returning.
+- IMPORTANT: There must be ZERO overlap between new_hits and guest_picks. Every song must appear exactly once across both lists combined.
 - Ensure the vibe is suitable for a live party atmosphere within the specific requested genres.
-- Do not repeat songs already submitted by the guests.
 
-Return exactly 20 objects matching the configured JSON schema.
-Use the keys track_name, artist_name, and reason only."""
+VALIDATION RULES (apply before returning):
+1. Album names are NOT songs. If you are unsure whether something is an album or a single, skip it and pick another song.
+2. Every song must have a real, specific artist name. If you cannot identify the artist with certainty, skip that song.
+3. Before returning, mentally verify each song exists as a real single on Spotify. If uncertain, replace it with a song you are 100% sure about.
 
-    # 6. 调用 Gemini
+Return exactly one JSON object matching the configured schema.
+Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
+
+    # 6. è°ƒç”¨ Gemini
+    print(f"[debug] prompt preview (last 500 chars): {prompt[-500:]}")
     try:
         response_text = _generate_with_gemini(prompt)
+        print(f"[debug] raw LLM response: {response_text[:500]}")
     except Exception as e:
         print(f"[Gemini API Error] {e}")
         raise RuntimeError(f"Gemini request failed: {e}") from e
 
-    # 7. JSON 解析
-    recommendations_data = _extract_recommendations(response_text)
+    # 7. JSON è§£æž
+    recommendations_data = _parse_llm_recommendations(response_text)
 
-    # 取 top 20
-    recommendations_data = recommendations_data[:20]
-
-    # 8. DELETE 旧 recommendations, INSERT Top-20
+    # 8. DELETE æ—§ recommendations, INSERT Top-20
     await db.execute(
         delete(Recommendation).where(Recommendation.session_id == session_id)
     )
 
     now = datetime.now(timezone.utc)
     results = []
+    import hashlib
     for i, item in enumerate(recommendations_data):
         rank = i + 1
         score = 1.0 - (rank - 1) * 0.04
         track_name = item.get("track_name", "Unknown Track")
         artist_name = item.get("artist_name", "Unknown Artist")
-        spotify_track_id = f"llm_{rank}"
+        source = item.get("source", "new")
+        safe_name = f"{track_name}-{artist_name}".lower().encode('utf-8')
+        spotify_track_id = f"llm_{source}_{hashlib.md5(safe_name).hexdigest()[:10]}"
 
         rec = Recommendation(
             session_id=session_id,
@@ -291,7 +313,7 @@ Use the keys track_name, artist_name, and reason only."""
             "is_cold_start": False,
         })
 
-    # 9. await db.commit()，返回列表
+    # 9. await db.commit()ï¼Œè¿”å›žåˆ—è¡¨
     await db.commit()
     return results
 
@@ -302,13 +324,15 @@ async def _cold_start_fallback(
     db: AsyncSession,
     guest_count: int,
     existing_tracks: list[GuestTrack] = None,
+    already_added_text: str = "None",
 ) -> list[dict]:
     """
-    Cold start 处理 (Gemini API 版本)：
-    - 使用 host 预设的 genre_seeds
-    - 如果有少量 guest tracks，提取一些歌曲名称作为上下文
-    - 调用 Gemini API 生成推荐
+    Cold start å¤„ç† (Gemini API ç‰ˆæœ¬)ï¼š
+    - ä½¿ç”¨ host é¢„è®¾çš„ genre_seeds
+    - å¦‚æžœæœ‰å°‘é‡ guest tracksï¼Œæå–ä¸€äº›æ­Œæ›²åç§°ä½œä¸ºä¸Šä¸‹æ–‡
+    - è°ƒç”¨ Gemini API ç”ŸæˆæŽ¨è
     """
+    settings = get_settings()
     genre_seeds = db_session.genre_seeds or []
     genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
     crowd_summary = ""
@@ -324,23 +348,38 @@ async def _cold_start_fallback(
 
 Current party genre setting: {genre_str}
 
-LATEST INTERNET SEARCH CONTEXT (Use this to find brand new songs!):
+TRENDING ARTISTS CONTEXT (use these artist names as inspiration for who to recommend):
 {internet_context}
+
+Use this to identify which artists are currently popular in {genre_str}.
+Then recommend real songs by these artists that you know with certainty exist.
 
 {"Here is the musical taste of existing guests: " + crowd_summary if crowd_summary else ""}
 
-Please strictly recommend 20 songs in the {genre_str} style.
+ALREADY ADDED TO PLAYLIST (CRITICAL: DO NOT RECOMMEND THESE SONGS AGAIN):
+{already_added_text}
+
+Please strictly recommend 10 songs in the {genre_str} style.
 CRITICAL Requirements:
 - NO HALLUCINATIONS / REAL SINGLES ONLY: You MUST recommend verified, real, individual song tracks. Do NOT recommend compilation albums, generic genre labels, or playlist titles.
-- DO NOT INVENT SONGS: If the internet context lacks 20 real songs, rely on your internal knowledge. NEVER invent songs or use "New Artist".
+- DO NOT INVENT SONGS: If the internet context lacks enough real songs, rely on your internal knowledge. NEVER invent songs or use "New Artist".
 - DO NOT SPLIT ALBUM NAMES: Do NOT hallucinate fake song titles by splitting an album name or confusing record labels with artists.
-- TIME FRAME: MUST be extremely recent, released within the last 2-3 years maximum (2024-2026). Do NOT recommend older songs.
+- TIME FRAME: Prefer songs released after 2020. Avoid songs older than 2015 unless they are absolute classics that still work in a party setting. Do NOT hallucinate release years â€” if you are unsure when a song was released, just omit the year.
 - GENRE: MUST be strictly of the {genre_str} style.
-- AVOID OUTDATED SONGS: Absolutely NO cliché, overplayed, or outdated "generic party" anthems.
+- AVOID OUTDATED SONGS: Absolutely NO clichÃ©, overplayed, or outdated "generic party" anthems.
+- SONG MIX RATIO (5:5): You MUST provide exactly 10 songs total. Exactly 5 songs MUST be brand new hits. Exactly 5 songs MUST be selected directly from the existing guests' tracks provided above (if any exist and fit the genre).
+- CRITICAL: The 5 songs in 'new_hits' MUST NOT be any song that appears in the guests' submitted tracks list above. new_hits are DJ-curated fresh discoveries ONLY. Cross-check every song in new_hits against the guest list before returning.
+- CRITICAL for new_hits: These MUST be songs that are NOT in the guest's submitted tracks. These are fresh DJ discoveries from the internet search context. Do NOT pick songs from the guest's list for new_hits under any circumstances. Cross-check: if a song appears in the guest taste section, it cannot appear in new_hits.
+- IMPORTANT: There must be ZERO overlap between new_hits and guest_picks. Every song must appear exactly once across both lists combined.
 - Ensure the vibe is suitable for a live party atmosphere within the requested genre constraints.
 
-Return exactly 20 objects matching the configured JSON schema.
-Use the keys track_name, artist_name, and reason only."""
+VALIDATION RULES (apply before returning):
+1. Album names are NOT songs. If you are unsure whether something is an album or a single, skip it and pick another song.
+2. Every song must have a real, specific artist name. If you cannot identify the artist with certainty, skip that song.
+3. Before returning, mentally verify each song exists as a real single on Spotify. If uncertain, replace it with a song you are 100% sure about.
+
+Return exactly one JSON object matching the configured schema.
+Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
 
     try:
         response_text = _generate_with_gemini(prompt)
@@ -348,14 +387,19 @@ Use the keys track_name, artist_name, and reason only."""
         print(f"[Gemini API Error] Cold Start: {e}")
         raise RuntimeError(f"Gemini request failed: {e}") from e
 
-    recommendations_data = _extract_recommendations(response_text)
+    recommendations_data = _parse_llm_recommendations(response_text)
 
     top_n = []
-    for i, rec in enumerate(recommendations_data[:20]):
+    import hashlib
+    for i, rec in enumerate(recommendations_data[:10]):
+        source = rec.get("source", "new")
+        t_name = rec.get("track_name", "Unknown Track")
+        a_name = rec.get("artist_name", "Unknown Artist")
+        safe_name = f"{t_name}-{a_name}".lower().encode('utf-8')
         top_n.append({
-            "spotify_track_id": f"llm_cold_{i+1}",
-            "track_name": rec.get("track_name", "Unknown Track"),
-            "artist_name": rec.get("artist_name", "Unknown Artist"),
+            "spotify_track_id": f"llm_cold_{source}_{hashlib.md5(safe_name).hexdigest()[:10]}",
+            "track_name": t_name,
+            "artist_name": a_name,
             "score": 1.0 - (i * 0.01),
         })
 
@@ -372,8 +416,8 @@ async def _save_recommendations(
     guest_count: int,
     is_cold_start: bool,
 ) -> list[dict]:
-    """将推荐结果写入数据库（先删旧数据再插入）"""
-    # 删除该 session 的旧推荐
+    """å°†æŽ¨èç»“æžœå†™å…¥æ•°æ®åº“ï¼ˆå…ˆåˆ æ—§æ•°æ®å†æ’å…¥ï¼‰"""
+    # åˆ é™¤è¯¥ session çš„æ—§æŽ¨è
     await db.execute(
         delete(Recommendation).where(Recommendation.session_id == session_id)
     )
@@ -402,5 +446,5 @@ async def _save_recommendations(
             "is_cold_start": is_cold_start,
         })
 
-    await db.flush()
+    await db.commit()
     return results

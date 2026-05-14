@@ -9,4 +9,4 @@ numpy>=1.26.0
 python-dotenv>=1.0.0
 qrcode[pil]>=8.0.0
 google-genai>=1.0.0
-duckduckgo_search>=6.0.0
+ddgs>=9.0.0

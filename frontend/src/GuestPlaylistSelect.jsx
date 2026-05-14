@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from './api';
 import { useI18n } from './i18n';
+import { Music, AlertTriangle, Check } from 'lucide-react';
 
 export default function GuestPlaylistSelect() {
   const { t } = useI18n();
@@ -32,7 +33,7 @@ export default function GuestPlaylistSelect() {
         setDisplayName(data.display_name);
         setLoading(false);
 
-        // 预加载所有歌单的歌曲
+        // é¢„åŠ è½½æ‰€æœ‰æ­Œå•çš„æ­Œæ›²
         for (const pl of data.playlists) {
           try {
             const trackData = await api.getPlaylistTracks(guestId, pl.id);
@@ -105,7 +106,7 @@ export default function GuestPlaylistSelect() {
     return (
       <div className="page-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '3rem', marginBottom: 16, animation: 'pulse 1.5s infinite' }}>🎵</div>
+          <div style={{ marginBottom: 16, animation: 'pulse 1.5s infinite' }}><Music size={48} color="#00A859" /></div>
           <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{t.loadingPlaylists}</div>
         </div>
       </div>
@@ -116,7 +117,7 @@ export default function GuestPlaylistSelect() {
     return (
       <div className="page-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
         <div className="nb-card" style={{ textAlign: 'center', padding: '40px 20px', maxWidth: 400, width: '100%' }}>
-          <div style={{ fontSize: '4rem', marginBottom: 20 }}>🎵</div>
+          <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'center' }}><Music size={64} color="#00A859" /></div>
           <h2 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: 16 }}>{t.submittedTitle}</h2>
           <p style={{ fontSize: '1.1rem', fontWeight: 600, color: '#555', marginBottom: 12 }}>
             {t.submittedDesc(selectedTracks.size)}
@@ -134,7 +135,7 @@ export default function GuestPlaylistSelect() {
       <div className="page-container" style={{ padding: '20px', minHeight: 'auto' }}>
         <div style={{ marginBottom: '24px' }}>
           <h1 style={{ fontSize: '1.8rem', fontWeight: 900, marginBottom: '8px', lineHeight: 1.2 }}>
-            {t.hi}，<span style={{ color: '#00A859' }}>{displayName}</span>！<br/>{t.selectMusicForParty}
+            {t.hi}ï¼Œ<span style={{ color: '#00A859' }}>{displayName}</span>ï¼<br/>{t.selectMusicForParty}
           </h1>
           <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#666' }}>
             {t.selectPlaylistDesc}
@@ -177,7 +178,7 @@ export default function GuestPlaylistSelect() {
                     {pl.image_url ? (
                       <img src={pl.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>🎵</div>
+                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={24} color="#555" /></div>
                     )}
                   </div>
 
@@ -197,7 +198,7 @@ export default function GuestPlaylistSelect() {
                       {tracks.length > 0 ? tracks.length : pl.track_count} {t.songs}
                       {selectedInPlaylist > 0 && (
                         <span style={{ color: '#00A859', marginLeft: 8 }}>
-                          · {t.selectedInPlaylist(selectedInPlaylist)}
+                          Â· {t.selectedInPlaylist(selectedInPlaylist)}
                         </span>
                       )}
                     </div>
@@ -211,7 +212,7 @@ export default function GuestPlaylistSelect() {
                     transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)',
                     flexShrink: 0,
                   }}>
-                    ▼
+                    â–¼
                   </div>
                 </div>
 
@@ -224,7 +225,7 @@ export default function GuestPlaylistSelect() {
                       </div>
                     ) : playlistError ? (
                       <div style={{ padding: '24px', textAlign: 'center', fontWeight: 700, color: '#e65100', backgroundColor: '#fff3e0' }}>
-                        ⚠️ {playlistError}
+                        <AlertTriangle size={18} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 6 }} /> {playlistError}
                       </div>
                     ) : tracks.length === 0 ? (
                       <div style={{ padding: '24px', textAlign: 'center', fontWeight: 700, color: '#888' }}>
@@ -313,7 +314,7 @@ export default function GuestPlaylistSelect() {
                                   color: '#fff', fontWeight: 900, fontSize: '0.8rem',
                                   flexShrink: 0
                                 }}>
-                                  ✓
+                                  <Check size={14} strokeWidth={4} />
                                 </div>
                               )}
                             </div>
