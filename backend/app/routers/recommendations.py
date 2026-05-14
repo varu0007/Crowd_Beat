@@ -51,7 +51,8 @@ async def get_recommendations(
     session_result = await db.execute(
         select(DBSession).where(DBSession.id == sid)
     )
-    if not session_result.scalar_one_or_none():
+    db_session = session_result.scalar_one_or_none()
+    if not db_session:
         raise HTTPException(status_code=404, detail="Session not found")
 
     # ---
@@ -61,6 +62,37 @@ async def get_recommendations(
         .order_by(Recommendation.rank.asc())
     )
     recs = result.scalars().all()
+
+    if not recs and db_session.status == "active":
+        try:
+            generated = await ml_engine.recompute(sid, db)
+        except Exception as exc:
+            print(f"[recommendations] lazy recompute failed: {exc}")
+            generated = []
+
+        if generated:
+            items = [
+                RecommendationItem(
+                    spotify_track_id=r["spotify_track_id"],
+                    track_name=r["track_name"],
+                    artist_name=r["artist_name"],
+                    score=r["score"],
+                    rank=r["rank"],
+                    is_cold_start=r.get("is_cold_start", False),
+                )
+                for r in generated
+            ]
+            guest_count_result = await db.execute(text(
+                "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
+            ), {"session_id": sid})
+            real_guest_count = guest_count_result.scalar() or 0
+            return RecommendationsResponse(
+                session_id=session_id,
+                count=len(items),
+                guest_count=real_guest_count,
+                is_cold_start=items[0].is_cold_start if items else False,
+                recommendations=items,
+            )
 
     if not recs:
         return RecommendationsResponse(

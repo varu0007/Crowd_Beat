@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import json
 import re
+import hashlib
 from collections import defaultdict
 
 import numpy as np
@@ -126,6 +127,122 @@ def _fetch_internet_context(genre_str: str) -> str:
     return "No internet context available."
 
 
+def _rank_guest_tracks(rows) -> list[dict]:
+    """Create reliable recommendations directly from saved guest tracks."""
+    seen: set[tuple[str, str]] = set()
+    ranked = []
+
+    for row in rows:
+        track_name = (row.track_name or "Unknown Track").strip()
+        artist_name = (row.artist_name or "Unknown Artist").strip()
+        key = (track_name.lower(), artist_name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+
+        popularity = row.popularity if row.popularity is not None else 50
+        digest = hashlib.md5(f"{track_name}-{artist_name}".lower().encode("utf-8")).hexdigest()[:10]
+        ranked.append({
+            "spotify_track_id": f"guest_{digest}",
+            "track_name": track_name,
+            "artist_name": artist_name,
+            "score": max(0.1, min(1.0, popularity / 100)),
+        })
+
+    ranked.sort(key=lambda item: item["score"], reverse=True)
+
+    for index, item in enumerate(ranked[:10]):
+        item["score"] = max(0.1, 1.0 - index * 0.04)
+
+    return ranked[:10]
+
+
+def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
+    genre_text = " ".join(genre_seeds).lower()
+    if "electronic" in genre_text or "edm" in genre_text or "dance" in genre_text:
+        picks = [
+            ("Rumble", "Skrillex, Fred again.. & Flowdan"),
+            ("Where You Are", "John Summit & Hayla"),
+            ("Atmosphere", "FISHER & Kita Alexander"),
+            ("Miracle", "Calvin Harris & Ellie Goulding"),
+            ("Disconnect", "Becky Hill & Chase & Status"),
+            ("Baddadan", "Chase & Status"),
+            ("Saving Up", "Dom Dolla"),
+            ("Prada", "casso, RAYE & D-Block Europe"),
+            ("Both", "Tiesto & BIA"),
+            ("Ray Of Solar", "Swedish House Mafia"),
+        ]
+    elif "hip" in genre_text or "rap" in genre_text:
+        picks = [
+            ("Not Like Us", "Kendrick Lamar"),
+            ("Paint The Town Red", "Doja Cat"),
+            ("SkeeYee", "Sexyy Red"),
+            ("First Person Shooter", "Drake feat. J. Cole"),
+            ("Lovin On Me", "Jack Harlow"),
+            ("FE!N", "Travis Scott feat. Playboi Carti"),
+            ("Barbie World", "Nicki Minaj & Ice Spice"),
+            ("Surround Sound", "JID feat. 21 Savage & Baby Tate"),
+            ("Players", "Coi Leray"),
+            ("Tomorrow 2", "GloRilla & Cardi B"),
+        ]
+    elif "pop" in genre_text:
+        picks = [
+            ("Espresso", "Sabrina Carpenter"),
+            ("Houdini", "Dua Lipa"),
+            ("Training Season", "Dua Lipa"),
+            ("greedy", "Tate McRae"),
+            ("Paint The Town Red", "Doja Cat"),
+            ("Water", "Tyla"),
+            ("yes, and?", "Ariana Grande"),
+            ("Cruel Summer", "Taylor Swift"),
+            ("Flowers", "Miley Cyrus"),
+            ("Dance The Night", "Dua Lipa"),
+        ]
+    else:
+        picks = [
+            ("Rumble", "Skrillex, Fred again.. & Flowdan"),
+            ("Espresso", "Sabrina Carpenter"),
+            ("Houdini", "Dua Lipa"),
+            ("Water", "Tyla"),
+            ("Prada", "casso, RAYE & D-Block Europe"),
+            ("Where You Are", "John Summit & Hayla"),
+            ("Paint The Town Red", "Doja Cat"),
+            ("greedy", "Tate McRae"),
+            ("Miracle", "Calvin Harris & Ellie Goulding"),
+            ("Disconnect", "Becky Hill & Chase & Status"),
+        ]
+
+    results = []
+    for index, (track_name, artist_name) in enumerate(picks):
+        digest = hashlib.md5(f"{track_name}-{artist_name}".lower().encode("utf-8")).hexdigest()[:10]
+        results.append({
+            "spotify_track_id": f"seed_{digest}",
+            "track_name": track_name,
+            "artist_name": artist_name,
+            "score": max(0.1, 1.0 - index * 0.04),
+        })
+    return results
+
+
+async def _save_ranked_tracks(
+    session_id: uuid.UUID,
+    top_n: list[dict],
+    db: AsyncSession,
+    guest_count: int,
+    is_cold_start: bool,
+) -> list[dict]:
+    if not top_n:
+        return []
+
+    return await _save_recommendations(
+        session_id=session_id,
+        top_n=top_n,
+        db=db,
+        guest_count=guest_count,
+        is_cold_start=is_cold_start,
+    )
+
+
 async def recompute(
     session_id: uuid.UUID,
     db: AsyncSession,
@@ -209,6 +326,16 @@ async def recompute(
     genre_seeds = session_row["genre_seeds"] if session_row and session_row["genre_seeds"] else []
     genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
 
+    async def save_guest_track_fallback() -> list[dict]:
+        print("[recommendations] using guest-track fallback")
+        return await _save_ranked_tracks(
+            session_id=session_id,
+            top_n=_rank_guest_tracks(rows),
+            db=db,
+            guest_count=guest_count,
+            is_cold_start=False,
+        )
+
     print(f"[debug] fetching internet context for {genre_str}...")
     import asyncio
     internet_context = await asyncio.to_thread(_fetch_internet_context, genre_str)
@@ -254,11 +381,13 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
     try:
         response_text = _generate_with_gemini(prompt)
         print(f"[debug] raw LLM response: {response_text[:500]}")
+        recommendations_data = _parse_llm_recommendations(response_text)
     except Exception as e:
-        print(f"[Gemini API Error] {e}")
-        raise RuntimeError(f"Gemini request failed: {e}") from e
+        print(f"[Gemini Recommendation Error] {e}")
+        return await save_guest_track_fallback()
 
-    recommendations_data = _parse_llm_recommendations(response_text)
+    if not recommendations_data:
+        return await save_guest_track_fallback()
 
     await db.execute(
         delete(Recommendation).where(Recommendation.session_id == session_id)
@@ -266,7 +395,6 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
 
     now = datetime.now(timezone.utc)
     results = []
-    import hashlib
     for i, item in enumerate(recommendations_data):
         rank = i + 1
         score = 1.0 - (rank - 1) * 0.04
@@ -298,6 +426,10 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
         })
 
     await db.commit()
+
+    if not results:
+        return await save_guest_track_fallback()
+
     return results
 
 
@@ -360,14 +492,25 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
 
     try:
         response_text = _generate_with_gemini(prompt)
+        recommendations_data = _parse_llm_recommendations(response_text)
     except Exception as e:
-        print(f"[Gemini API Error] Cold Start: {e}")
-        raise RuntimeError(f"Gemini request failed: {e}") from e
-
-    recommendations_data = _parse_llm_recommendations(response_text)
+        print(f"[Gemini Recommendation Error] Cold Start: {e}")
+        if existing_tracks:
+            rows = [
+                type("TrackRow", (), {
+                    "track_name": track.track_name,
+                    "artist_name": track.artist_name,
+                    "popularity": track.popularity,
+                })
+                for track in existing_tracks
+            ]
+            fallback = _rank_guest_tracks(rows)
+            if fallback:
+                return await _save_ranked_tracks(session_id, fallback, db, guest_count, is_cold_start=True)
+        seeded = _genre_seed_recommendations(genre_seeds)
+        return await _save_ranked_tracks(session_id, seeded, db, guest_count, is_cold_start=True)
 
     top_n = []
-    import hashlib
     for i, rec in enumerate(recommendations_data[:10]):
         source = rec.get("source", "new")
         t_name = rec.get("track_name", "Unknown Track")
