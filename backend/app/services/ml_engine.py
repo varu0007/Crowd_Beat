@@ -6,6 +6,7 @@ from typing import Optional
 import json
 import re
 import hashlib
+import importlib
 from collections import defaultdict
 
 import numpy as np
@@ -160,7 +161,7 @@ def _parse_llm_recommendations(response_text: str) -> list[dict]:
 def _fetch_internet_context(genre_str: str) -> str:
     """Fetch a compact current-music context for the requested genre."""
     try:
-        from ddgs import DDGS
+        DDGS = importlib.import_module("ddgs").DDGS
         results = DDGS().text(
             f"trending {genre_str} artists 2024 2025 who are popular now",
             max_results=8,
