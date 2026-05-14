@@ -175,32 +175,60 @@ def _fetch_internet_context(genre_str: str) -> str:
 
 
 def _rank_guest_tracks(rows) -> list[dict]:
-    """Create reliable recommendations directly from saved guest tracks."""
-    seen: set[tuple[str, str]] = set()
-    ranked = []
+    """Rank guest tracks using weighted audio features from config.
 
+    Each track gets a composite score from the configurable weights:
+      danceability, energy, valence, tempo (normalised), acousticness,
+      instrumentalness.  Popularity is used as a tiebreaker at 10 % weight.
+    Duplicate (name, artist) pairs are merged by taking the best score seen.
+    """
+    settings = get_settings()
+
+    # Normalise tempo: typical party BPM range 60–200.
+    _TEMPO_MIN, _TEMPO_MAX = 60.0, 200.0
+
+    def _audio_score(row) -> float:
+        def _get(attr: str, default: float) -> float:
+            val = getattr(row, attr, None)
+            return float(val) if val is not None else default
+
+        dance = _get("danceability", 0.5)
+        energy = _get("energy", 0.5)
+        valence = _get("valence", 0.5)
+        raw_tempo = _get("tempo", 120.0)
+        tempo_norm = max(0.0, min(1.0, (raw_tempo - _TEMPO_MIN) / (_TEMPO_MAX - _TEMPO_MIN)))
+        acoustic = _get("acousticness", 0.3)
+        instrumental = _get("instrumentalness", 0.1)
+        popularity = _get("popularity", 50.0) / 100.0
+
+        score = (
+            settings.WEIGHT_DANCEABILITY   * dance
+            + settings.WEIGHT_ENERGY       * energy
+            + settings.WEIGHT_VALENCE      * valence
+            + settings.WEIGHT_TEMPO        * tempo_norm
+            + settings.WEIGHT_ACOUSTICNESS * (1.0 - acoustic)   # lower acousticness = better for parties
+            + settings.WEIGHT_INSTRUMENTALNESS * (1.0 - instrumental)  # vocal tracks preferred
+            + 0.10                         * popularity          # soft popularity tiebreaker
+        )
+        return round(min(1.0, max(0.0, score)), 4)
+
+    # Deduplicate by (track_name, artist_name), keep best score
+    best: dict[tuple[str, str], dict] = {}
     for row in rows:
         track_name = (row.track_name or "Unknown Track").strip()
         artist_name = (row.artist_name or "Unknown Artist").strip()
         key = (track_name.lower(), artist_name.lower())
-        if key in seen:
-            continue
-        seen.add(key)
+        score = _audio_score(row)
+        if key not in best or score > best[key]["score"]:
+            digest = hashlib.md5(f"{track_name}-{artist_name}".lower().encode("utf-8")).hexdigest()[:10]
+            best[key] = {
+                "spotify_track_id": f"guest_{digest}",
+                "track_name": track_name,
+                "artist_name": artist_name,
+                "score": score,
+            }
 
-        popularity = row.popularity if row.popularity is not None else 50
-        digest = hashlib.md5(f"{track_name}-{artist_name}".lower().encode("utf-8")).hexdigest()[:10]
-        ranked.append({
-            "spotify_track_id": f"guest_{digest}",
-            "track_name": track_name,
-            "artist_name": artist_name,
-            "score": max(0.1, min(1.0, popularity / 100)),
-        })
-
-    ranked.sort(key=lambda item: item["score"], reverse=True)
-
-    for index, item in enumerate(ranked[:10]):
-        item["score"] = max(0.1, 1.0 - index * 0.04)
-
+    ranked = sorted(best.values(), key=lambda item: item["score"], reverse=True)
     return ranked[:10]
 
 
@@ -307,8 +335,13 @@ async def recompute(
     already_added_strs = [f"{r.track_name} - {r.artist_name}" for r in playlist_rows]
     already_added_text = "\n".join(already_added_strs) if already_added_strs else "None"
 
+    # Fetch audio features alongside track info so scoring and prompts can use them
     stmt = text("""
-        SELECT gt.track_name, gt.artist_name, gt.popularity, g.display_name
+        SELECT
+            gt.track_name, gt.artist_name, gt.popularity,
+            gt.danceability, gt.energy, gt.valence,
+            gt.tempo, gt.acousticness, gt.instrumentalness,
+            g.display_name
         FROM guest_tracks gt
         JOIN guests g ON gt.guest_id = g.id
         WHERE g.session_id = :session_id
@@ -317,6 +350,16 @@ async def recompute(
     rows = result.fetchall()
     print(f"[debug] found {len(rows)} tracks")
 
+    # Count guests up front so cold-start threshold can be applied consistently
+    guest_count_result = await db.execute(text(
+        "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
+    ), {"session_id": session_id})
+    guest_count = guest_count_result.scalar() or 0
+    print(f"[debug] guest_count={guest_count}")
+
+    settings = get_settings()
+
+    # No tracks at all -> pure cold start
     if not rows:
         session_result = await db.execute(
             select(DBSession).where(DBSession.id == session_id)
@@ -324,39 +367,57 @@ async def recompute(
         db_session = session_result.scalar_one_or_none()
         if not db_session:
             return []
-
-        guest_count_result = await db.execute(
-            select(func.count()).where(Guest.session_id == session_id)
-        )
-        guest_count = guest_count_result.scalar() or 0
         return await _cold_start_fallback(session_id, db_session, db, guest_count, [], already_added_text)
 
-    guest_tracks_map = defaultdict(list)
-    for row in rows:
-        guest_tracks_map[row.display_name].append({
-            "track": row.track_name,
-            "artist": row.artist_name,
-        })
-
-    guest_count_result = await db.execute(text(
-        "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
-    ), {"session_id": session_id})
-    guest_count = guest_count_result.scalar() or 0
-    print(f"[debug] guest_count={guest_count}")
-
-    if len(guest_tracks_map) == 0:
+    # Below guest threshold -> cold start (may still use existing tracks as hints)
+    if guest_count < settings.COLD_START_THRESHOLD:
+        print(f"[debug] below cold-start threshold ({guest_count} < {settings.COLD_START_THRESHOLD}), using cold-start path")
         session_result = await db.execute(
             select(DBSession).where(DBSession.id == session_id)
         )
         db_session = session_result.scalar_one_or_none()
         if not db_session:
             return []
-
         tracks_result = await db.execute(
             select(GuestTrack).join(Guest, GuestTrack.guest_id == Guest.id).where(Guest.session_id == session_id)
         )
         all_tracks = tracks_result.scalars().all()
         return await _cold_start_fallback(session_id, db_session, db, guest_count, all_tracks, already_added_text)
+
+    # ------------------------------------------------------------------ #
+    # Warm-start: build per-guest track lists + aggregate audio features  #
+    # ------------------------------------------------------------------ #
+    guest_tracks_map: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        guest_tracks_map[row.display_name].append({
+            "track": row.track_name,
+            "artist": row.artist_name,
+        })
+
+    def _safe_float(val, default=None):
+        try:
+            return float(val) if val is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    # Aggregate audio features across all guest tracks for the Gemini prompt
+    feature_sums = {f: 0.0 for f in ("danceability", "energy", "valence", "tempo", "acousticness", "instrumentalness")}
+    feature_counts = {f: 0 for f in feature_sums}
+    for row in rows:
+        for feat in feature_sums:
+            v = _safe_float(getattr(row, feat, None))
+            if v is not None:
+                feature_sums[feat] += v
+                feature_counts[feat] += 1
+
+    audio_summary_parts = []
+    for feat in feature_sums:
+        cnt = feature_counts[feat]
+        if cnt > 0:
+            avg = feature_sums[feat] / cnt
+            audio_summary_parts.append(f"{feat.capitalize()}: {avg:.2f}")
+    audio_summary = ", ".join(audio_summary_parts) if audio_summary_parts else "No audio data available"
+    print(f"[debug] crowd audio profile: {audio_summary}")
 
     guest_lines = []
     for guest_name, tracks in guest_tracks_map.items():
@@ -374,13 +435,15 @@ async def recompute(
     genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
 
     async def save_guest_track_fallback() -> list[dict]:
-        print("[recommendations] using guest-track fallback")
+        """Fallback: rank guest tracks by audio features when Gemini is unavailable."""
+        print("[recommendations] using guest-track fallback (audio-feature ranked)")
+        is_cold = guest_count < settings.COLD_START_THRESHOLD
         return await _save_ranked_tracks(
             session_id=session_id,
             top_n=_rank_guest_tracks(rows),
             db=db,
             guest_count=guest_count,
-            is_cold_start=False,
+            is_cold_start=is_cold,
         )
 
     print(f"[debug] fetching internet context for {genre_str}...")
@@ -396,6 +459,12 @@ TRENDING ARTISTS CONTEXT (use these artist names as inspiration for who to recom
 
 Use this to identify which artists are currently popular in {genre_str}.
 Then recommend real songs by these artists that you know with certainty exist.
+
+CROWD AUDIO PROFILE (average Spotify audio features across all guest tracks — use this to match the vibe):
+{audio_summary}
+Interpret these values: Danceability/Energy/Valence are 0–1 (higher = more danceable/energetic/positive).
+Tempo is in BPM. Acousticness/Instrumentalness are 0–1 (higher = more acoustic/instrumental).
+Prioritise recommending songs that match this crowd's vibe closely.
 
 Guests' musical tastes (for reference only, NEVER use this to break the DJ's genre rules):
 {guest_info_str}
