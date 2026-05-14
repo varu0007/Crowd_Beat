@@ -1,14 +1,4 @@
-"""
-admin.py â€” ç®¡ç†ç«¯ç‚¹ï¼šæŸ¥çœ‹ / åˆ é™¤ PostgreSQL å››å¼ è¡¨çš„æ•°æ®
-ç«¯ç‚¹ï¼š
-  GET    /admin/sessions               â†’ åœºæ¬¡åˆ—è¡¨ (å« guest_count)
-  GET    /admin/guests                 â†’ è§‚ä¼—åˆ—è¡¨ (?session_id=xxx è¿‡æ»¤)
-  GET    /admin/tracks                 â†’ æ­Œæ›²åˆ—è¡¨ (?guest_id=xxx è¿‡æ»¤)
-  GET    /admin/recommendations        â†’ æŽ¨èåˆ—è¡¨ (?session_id=xxx è¿‡æ»¤)
-  DELETE /admin/sessions/{id}          â†’ çº§è”åˆ é™¤åœºæ¬¡
-  DELETE /admin/guests/{id}            â†’ çº§è”åˆ é™¤è§‚ä¼—
-  DELETE /admin/tracks/{id}            â†’ åˆ é™¤å•æ¡æ­Œæ›²
-"""
+"""CrowdBeat module."""
 
 import uuid
 from typing import Optional
@@ -28,11 +18,11 @@ from app.models.database import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-# â”€â”€ Sessions â”€â”€
+# ---
 
 @router.get("/sessions")
 async def list_sessions(db: AsyncSession = Depends(get_db)):
-    """æŸ¥è¯¢æ‰€æœ‰åœºæ¬¡ï¼Œé™„å¸¦æ¯ä¸ªåœºæ¬¡çš„ guest æ•°é‡"""
+    """Internal helper."""
     result = await db.execute(
         select(DBSession).order_by(DBSession.created_at.desc()).limit(50)
     )
@@ -40,7 +30,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
 
     items = []
     for s in sessions:
-        # æŸ¥è¯¢è¯¥ session çš„ guest æ•°é‡
+        # ---
         gc_result = await db.execute(
             select(func.count()).where(Guest.session_id == s.id)
         )
@@ -61,35 +51,35 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
-    """çº§è”åˆ é™¤åœºæ¬¡åŠå…¶æ‰€æœ‰å…³è”æ•°æ®"""
+    """Internal helper."""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
-    # æŸ¥å‡ºè¯¥ session ä¸‹æ‰€æœ‰ guest ids
+    # ---
     guest_result = await db.execute(
         select(Guest.id).where(Guest.session_id == sid)
     )
     guest_ids = [row[0] for row in guest_result.all()]
 
-    # 1. åˆ  recommendations
+    # ---
     await db.execute(
         delete(Recommendation).where(Recommendation.session_id == sid)
     )
 
-    # 2. åˆ  guest_tracks
+    # ---
     if guest_ids:
         await db.execute(
             delete(GuestTrack).where(GuestTrack.guest_id.in_(guest_ids))
         )
 
-    # 3. åˆ  guests
+    # ---
     await db.execute(
         delete(Guest).where(Guest.session_id == sid)
     )
 
-    # 4. åˆ  session
+    # ---
     await db.execute(
         delete(DBSession).where(DBSession.id == sid)
     )
@@ -97,14 +87,14 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-# â”€â”€ Guests â”€â”€
+# ---
 
 @router.get("/guests")
 async def list_guests(
     session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """æŸ¥è¯¢è§‚ä¼—åˆ—è¡¨ï¼Œæ”¯æŒæŒ‰ session_id è¿‡æ»¤"""
+    """Internal helper."""
     stmt = select(Guest).order_by(Guest.joined_at.desc()).limit(100)
 
     if session_id:
@@ -131,18 +121,18 @@ async def list_guests(
 
 @router.delete("/guests/{guest_id}")
 async def delete_guest(guest_id: str, db: AsyncSession = Depends(get_db)):
-    """çº§è”åˆ é™¤è§‚ä¼—åŠå…¶æ­Œæ›²æ•°æ®"""
+    """Internal helper."""
     try:
         gid = uuid.UUID(guest_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid guest_id")
 
-    # 1. åˆ  guest_tracks
+    # ---
     await db.execute(
         delete(GuestTrack).where(GuestTrack.guest_id == gid)
     )
 
-    # 2. åˆ  guest
+    # ---
     await db.execute(
         delete(Guest).where(Guest.id == gid)
     )
@@ -150,7 +140,7 @@ async def delete_guest(guest_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-# â”€â”€ Tracks â”€â”€
+# ---
 
 @router.get("/tracks")
 async def list_tracks(
@@ -158,7 +148,7 @@ async def list_tracks(
     session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """æŸ¥è¯¢æ­Œæ›²åˆ—è¡¨ï¼Œæ”¯æŒæŒ‰ guest_id æˆ– session_id è¿‡æ»¤"""
+    """Internal helper."""
     stmt = select(GuestTrack)
 
     if session_id:
@@ -201,21 +191,21 @@ async def list_tracks(
 
 @router.delete("/tracks/{track_id}")
 async def delete_track(track_id: int, db: AsyncSession = Depends(get_db)):
-    """åˆ é™¤å•æ¡æ­Œæ›²è®°å½•"""
+    """Internal helper."""
     await db.execute(
         delete(GuestTrack).where(GuestTrack.id == track_id)
     )
     return {"ok": True}
 
 
-# â”€â”€ Recommendations â”€â”€
+# ---
 
 @router.get("/recommendations")
 async def list_recommendations(
     session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """æŸ¥è¯¢æŽ¨èåˆ—è¡¨ï¼Œæ”¯æŒæŒ‰ session_id è¿‡æ»¤"""
+    """Internal helper."""
     stmt = select(Recommendation).order_by(Recommendation.rank.asc()).limit(100)
 
     if session_id:
@@ -244,14 +234,14 @@ async def list_recommendations(
         for r in recs
     ]
 
-# â”€â”€ Playlist Tracks â”€â”€
+# ---
 
 @router.get("/playlist_tracks")
 async def list_playlist_tracks(
     session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """æŸ¥è¯¢è™šæ‹Ÿå¾…æ’­æ­Œå•åˆ—è¡¨ï¼Œæ”¯æŒæŒ‰ session_id è¿‡æ»¤"""
+    """Internal helper."""
     from app.models.database import PlaylistTrack
     stmt = select(PlaylistTrack).order_by(PlaylistTrack.added_at.desc()).limit(100)
 

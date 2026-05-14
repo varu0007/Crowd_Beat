@@ -1,7 +1,4 @@
-"""
-database.py â€” SQLAlchemy 2.0 å¼‚æ­¥æ¨¡åž‹å®šä¹‰
-åŒ…å« 4 å¼ è¡¨: sessions, guests, guest_tracks, recommendations
-"""
+"""CrowdBeat module."""
 
 import uuid
 from datetime import datetime, timezone
@@ -34,20 +31,20 @@ from sqlalchemy.orm import (
 from app.config import get_settings
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---
 # Base
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---
 
 class Base(DeclarativeBase):
     pass
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---
 # Models
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---
 
 class Session(Base):
-    """DJ æ´»åŠ¨åœºæ¬¡"""
+    """Internal helper."""
     __tablename__ = "sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -76,7 +73,7 @@ class Session(Base):
     )
 
 class PlaylistTrack(Base):
-    """DJ å†…éƒ¨è™šæ‹Ÿæ­Œå•è®°å½•"""
+    """Internal helper."""
     __tablename__ = "playlist_tracks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -100,7 +97,7 @@ class PlaylistTrack(Base):
 
 
 class Guest(Base):
-    """æ‰«ç åŠ å…¥çš„è§‚ä¼—"""
+    """Internal helper."""
     __tablename__ = "guests"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -132,7 +129,7 @@ class Guest(Base):
 
 
 class GuestTrack(Base):
-    """è§‚ä¼—çš„ top tracks + audio features"""
+    """Internal helper."""
     __tablename__ = "guest_tracks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -162,7 +159,7 @@ class GuestTrack(Base):
 
 
 class Recommendation(Base):
-    """æŽ¨èç»“æžœå¿«ç…§"""
+    """Internal helper."""
     __tablename__ = "recommendations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -184,16 +181,16 @@ class Recommendation(Base):
     session: Mapped["Session"] = relationship(back_populates="recommendations")
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---
 # Async Engine & Session Factory
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---
 
 _engine = None
 _async_session_factory = None
 
 
 def get_engine():
-    """èŽ·å–æˆ–åˆ›å»º async engineï¼ˆå»¶è¿Ÿåˆå§‹åŒ–ï¼‰"""
+    """Internal helper."""
     global _engine
     if _engine is None:
         settings = get_settings()
@@ -207,7 +204,7 @@ def get_engine():
 
 
 def get_session_factory():
-    """èŽ·å–æˆ–åˆ›å»º async session factory"""
+    """Internal helper."""
     global _async_session_factory
     if _async_session_factory is None:
         _async_session_factory = async_sessionmaker(
@@ -219,7 +216,7 @@ def get_session_factory():
 
 
 async def get_db():
-    """FastAPI ä¾èµ–æ³¨å…¥ï¼šæä¾›æ•°æ®åº“ session"""
+    """Internal helper."""
     factory = get_session_factory()
     async with factory() as session:
         try:
@@ -231,14 +228,14 @@ async def get_db():
 
 
 async def init_db():
-    """åˆ›å»ºæ‰€æœ‰è¡¨ï¼ˆé¦–æ¬¡å¯åŠ¨æ—¶è°ƒç”¨ï¼‰"""
+    """Internal helper."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def close_db():
-    """å…³é—­æ•°æ®åº“è¿žæŽ¥æ± """
+    """Internal helper."""
     global _engine, _async_session_factory
     if _engine:
         await _engine.dispose()

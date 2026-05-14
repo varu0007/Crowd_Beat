@@ -1,9 +1,4 @@
-"""
-recommendations.py â€” æŽ¨èç»“æžœè·¯ç”±
-ç«¯ç‚¹ï¼š
-  GET  /recommendations/{session_id}          â†’ èŽ·å–å½“å‰æŽ¨èåˆ—è¡¨
-  POST /recommendations/{session_id}/refresh  â†’ æ‰‹åŠ¨åˆ·æ–°æŽ¨è
-"""
+"""CrowdBeat module."""
 
 import uuid
 
@@ -18,7 +13,7 @@ from app.services import ml_engine, crowd_engine
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
-# â”€â”€ Response Schemas â”€â”€
+# ---
 
 class RecommendationItem(BaseModel):
     spotify_track_id: str
@@ -39,27 +34,27 @@ class RecommendationsResponse(BaseModel):
     recommendations: list[RecommendationItem]
 
 
-# â”€â”€ Endpoints â”€â”€
+# ---
 
 @router.get("/{session_id}", response_model=RecommendationsResponse)
 async def get_recommendations(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """èŽ·å–æŒ‡å®š session çš„å½“å‰æŽ¨èåˆ—è¡¨"""
+    """Internal helper."""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
-    # éªŒè¯ session å­˜åœ¨
+    # ---
     session_result = await db.execute(
         select(DBSession).where(DBSession.id == sid)
     )
     if not session_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # æŸ¥è¯¢æŽ¨è
+    # ---
     result = await db.execute(
         select(Recommendation)
         .where(Recommendation.session_id == sid)
@@ -88,7 +83,7 @@ async def get_recommendations(
         for r in recs
     ]
 
-    # æŸ¥è¯¢çœŸå®ž guest æ•°é‡
+    # ---
     guest_count_result = await db.execute(text(
         "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
     ), {"session_id": sid})
@@ -108,13 +103,13 @@ async def refresh_recommendations(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """DJ æ‰‹åŠ¨è§¦å‘æŽ¨èåˆ·æ–°"""
+    """Internal helper."""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
-    # éªŒè¯ session å­˜åœ¨ä¸”æ´»è·ƒ
+    # ---
     session_result = await db.execute(
         select(DBSession).where(
             DBSession.id == sid,
@@ -124,13 +119,13 @@ async def refresh_recommendations(
     if not session_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Session not found or closed")
 
-    # é‡æ–°è®¡ç®—æŽ¨è
+    # ---
     try:
         recommendations = await ml_engine.recompute(sid, db)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # WebSocket å¹¿æ’­
+    # ---
     await crowd_engine.broadcast(sid, {
         "type": "recommendations_update",
         "session_id": session_id,
@@ -151,7 +146,7 @@ async def refresh_recommendations(
         for r in recommendations
     ]
 
-    # æŸ¥è¯¢çœŸå®ž guest æ•°é‡
+    # ---
     guest_count_result = await db.execute(text(
         "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
     ), {"session_id": sid})

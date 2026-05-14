@@ -6,17 +6,17 @@ import { useI18n } from './i18n';
 
 // === Format helpers ===
 function truncate(str) {
-  if (!str) return 'â€”';
+  if (!str) return '-';
   return str.length > 8 ? str.substring(0, 8) + '...' : str;
 }
 
 function formatDate(isoStr) {
-  if (!isoStr) return 'â€”';
+  if (!isoStr) return '-';
   return new Date(isoStr).toLocaleString();
 }
 
 function pct(v) {
-  return v != null ? `${Math.round(v * 100)}` : 'â€”';
+  return v != null ? `${Math.round(v * 100)}` : '-';
 }
 
 export default function DatabaseView() {
@@ -162,7 +162,7 @@ export default function DatabaseView() {
                 Copy
               </button>
             </div>
-            <button className="nb-btn nb-btn--ghost" onClick={() => setQrSession(null)} style={{ width: '100%' }}>ë‹«ê¸°</button>
+            <button className="nb-btn nb-btn--ghost" onClick={() => setQrSession(null)} style={{ width: '100%' }}>Close</button>
           </div>
         </div>
       )}
@@ -205,7 +205,7 @@ export default function DatabaseView() {
               <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {sessionFilter ? (allSessions.find(s => s.id === sessionFilter)?.name || truncate(sessionFilter)) : t.dbAllSessions}
               </span>
-              <span style={{ fontSize: '0.8rem' }}>{dropdownOpen ? 'â–²' : 'â–¼'}</span>
+              <span style={{ fontSize: '0.8rem' }}>{dropdownOpen ? '▲' : '▼'}</span>
             </div>
 
             {dropdownOpen && (
@@ -247,7 +247,7 @@ export default function DatabaseView() {
           {activeTab === 'tracks' && guestFilter && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, backgroundColor: '#fff', padding: '6px 12px', border: '3px solid #000' }}>
               <span style={{ fontWeight: 700 }}>Guest ID: {truncate(guestFilter)}</span>
-              <button className="nb-btn nb-btn--small nb-btn--danger" style={{ padding: '2px 8px', minWidth: 0, fontSize: '0.8rem' }} onClick={() => setGuestFilter('')}>âœ•</button>
+              <button className="nb-btn nb-btn--small nb-btn--danger" style={{ padding: '2px 8px', minWidth: 0, fontSize: '0.8rem' }} onClick={() => setGuestFilter('')}>X</button>
             </div>
           )}
 
@@ -296,7 +296,7 @@ export default function DatabaseView() {
                           {item.status}
                         </span>
                       </td>
-                      <td>{(item.genre_seeds || []).join(', ') || 'â€”'}</td>
+                      <td>{(item.genre_seeds || []).join(', ') || '-'}</td>
                       <td>{formatDate(item.created_at)}</td>
                       <td style={{ fontWeight: 'bold', color: '#00A859' }}>{item.guest_count}</td>
                       <td className="actions-cell">
@@ -333,7 +333,7 @@ export default function DatabaseView() {
                       <td title={item.id} style={{ fontWeight: 'bold' }}>{truncate(item.id)}</td>
                       <td title={item.session_id}>{truncate(item.session_id)}</td>
                       <td>{item.display_name}</td>
-                      <td>{item.spotify_user_id || 'â€”'}</td>
+                      <td>{item.spotify_user_id || '-'}</td>
                       <td>{formatDate(item.joined_at)}</td>
                       <td className="actions-cell">
                         <button className="nb-btn nb-btn--small nb-btn--ghost" onClick={() => navigateToTracks(item.id)} style={{ marginRight: '8px' }}>{t.btnViewTracks}</button>
@@ -368,7 +368,7 @@ export default function DatabaseView() {
                       <td title={item.guest_id}>{truncate(item.guest_id)}</td>
                       <td style={{ fontWeight: 'bold' }}>{item.track_name}</td>
                       <td>{item.artist_name}</td>
-                      <td>{item.popularity ?? 'â€”'}</td>
+                      <td>{item.popularity ?? '-'}</td>
                       <td>{pct(item.danceability)}</td>
                       <td>{pct(item.energy)}</td>
                       <td>{pct(item.valence)}</td>
@@ -404,7 +404,7 @@ export default function DatabaseView() {
                       <td style={{ fontWeight: 'bold' }}>{item.track_name}</td>
                       <td>{item.artist_name}</td>
                       <td style={{ fontWeight: 'bold' }}>{pct(item.score)}</td>
-                      <td>{item.is_cold_start ? t.yesColdStart : 'â€”'}</td>
+                      <td>{item.is_cold_start ? t.yesColdStart : '-'}</td>
                       <td>{formatDate(item.generated_at)}</td>
                       <td>{item.guest_count}</td>
                     </tr>

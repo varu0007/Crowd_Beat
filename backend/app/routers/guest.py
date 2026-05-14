@@ -1,6 +1,4 @@
-"""
-guest.py â€” è§‚ä¼—ç›¸å…³ç«¯ç‚¹
-"""
+"""CrowdBeat module."""
 import uuid
 from typing import List, Optional
 
@@ -134,7 +132,7 @@ async def submit_playlists(
 
 @router.get("/{guest_id}/playlists/{playlist_id}/tracks")
 async def get_playlist_tracks(guest_id: str, playlist_id: str, db: AsyncSession = Depends(get_db)):
-    """èŽ·å–æŒ‡å®šæ­Œå•å†…çš„æ­Œæ›²åˆ—è¡¨"""
+    """Internal helper."""
     try:
         gid = uuid.UUID(guest_id)
     except ValueError:
@@ -156,9 +154,9 @@ async def get_playlist_tracks(guest_id: str, playlist_id: str, db: AsyncSession 
     except Exception as e:
         error_str = str(e)
         if "403" in error_str or "Forbidden" in error_str:
-            # æƒé™ä¸è¶³ï¼ˆå¦‚åˆ«äººçš„æ­Œå•ã€å—é™æ­Œå•ï¼‰ï¼Œè¿”å›žç©ºåˆ—è¡¨è€Œä¸æ˜¯æŠ¥é”™
+            # ---
             print(f"[guest] 403 for playlist {playlist_id}: {e}")
-            return {"playlist_id": playlist_id, "tracks": [], "error": "æ­¤æ­Œå•æ— æ³•è®¿é—®ï¼ˆæƒé™ä¸è¶³ï¼‰"}
+            return {"playlist_id": playlist_id, "tracks": [], "error": "This playlist cannot be accessed with the current Spotify permissions."}
         raise HTTPException(status_code=500, detail=f"Failed to fetch tracks: {e}")
 
     return {"playlist_id": playlist_id, "tracks": tracks}
@@ -171,7 +169,7 @@ async def submit_tracks(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    """æäº¤ç”¨æˆ·é€‰æ‹©çš„å…·ä½“æ­Œæ›²è¿›è¡Œåˆ†æž"""
+    """Internal helper."""
     try:
         gid = uuid.UUID(guest_id)
     except ValueError:

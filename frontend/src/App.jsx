@@ -437,9 +437,9 @@ function SpotifyFetcher() {
       setProgressInfo('Step 3/3: Saving to database...');
       const count = await addSongsBatch(enrichedSongs);
       setProgressInfo('');
-      setSaveResult(`âœ“ å·²æˆåŠŸä¿å­˜ ${count} é¦–æ­Œæ›²åˆ°æ•°æ®åº“ï¼(å« ${Object.keys(enrichedSongs[0] || {}).length} ä¸ªå…ƒæ•°æ®å­—æ®µ)`);
+      setSaveResult(`Saved ${count} tracks to the database (${Object.keys(enrichedSongs[0] || {}).length} metadata fields)`);
     } catch (err) {
-      setSaveResult(`âœ— ä¿å­˜å¤±è´¥: ${err.message}`);
+      setSaveResult(`Save failed: ${err.message}`);
     } finally {
       setSavingToDB(false);
       setProgressInfo('');
@@ -601,18 +601,18 @@ function SpotifyFetcher() {
                      marginTop: '12px',
                      padding: '12px 18px',
                      border: '3px solid #000',
-                     backgroundColor: saveResult.startsWith('âœ“') ? '#d4f8d4' : '#fdd',
+                     backgroundColor: saveResult.startsWith('Saved') ? '#d4f8d4' : '#fdd',
                      fontWeight: 'bold',
                      boxShadow: '3px 3px 0 #000',
                    }}>
                      {saveResult}
-                     {saveResult.startsWith('âœ“') && (
+                     {saveResult.startsWith('Saved') && (
                        <button
                          className="nb-btn nb-btn--small nb-btn--ghost"
                          style={{ marginLeft: '12px' }}
                          onClick={() => navigate('/database')}
                        >
-                         å‰å¾€æ•°æ®åº“æŸ¥çœ‹ â†’
+                         View in Database
                        </button>
                      )}
                    </div>
@@ -703,7 +703,7 @@ function CallbackHandler() {
     if (code) {
       // Check if this is a DJ PKCE flow callback (legacy)
       if (state && state.startsWith('dj_host')) {
-        // Legacy DJ PKCE flow â€” redirect to home
+        // Legacy DJ PKCE flow: redirect to home
         navigate('/', { replace: true });
       } else {
         // Guest flow: forward to backend

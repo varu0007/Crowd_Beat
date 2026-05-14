@@ -228,7 +228,7 @@ export default function HostDashboard() {
           <div style={{ padding: 30 }}>
             {recommendations.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">ðŸŽ§</div>
+                <div className="empty-icon">Music</div>
                 <div className="empty-title">{t.waitingForGuests}</div>
                 <div className="empty-desc">{t.waitingForGuestsDesc}</div>
               </div>

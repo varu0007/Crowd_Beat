@@ -101,7 +101,7 @@ export default function DJWorkstation() {
       {error && (
         <div style={{ backgroundColor: '#FF4C4C', color: '#fff', border: '3px solid #000', padding: 12, fontWeight: 700, marginBottom: 20, boxShadow: '4px 4px 0 #000' }}>
           {error}
-          <button onClick={() => setError(null)} style={{ float: 'right', background: 'none', border: 'none', color: '#fff', fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit' }}>âœ•</button>
+          <button onClick={() => setError(null)} style={{ float: 'right', background: 'none', border: 'none', color: '#fff', fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit' }}>X</button>
         </div>
       )}
 

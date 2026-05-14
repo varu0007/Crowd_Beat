@@ -1,15 +1,13 @@
-"""
-config.py â€” åº”ç”¨é…ç½®
-ä½¿ç”¨ pydantic-settings ä»Ž .env æ–‡ä»¶åŠ è½½çŽ¯å¢ƒå˜é‡
-"""
+"""Application settings loaded from environment variables."""
 
-from pydantic_settings import BaseSettings
 from functools import lru_cache
 import os
 
+from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
-    """CrowdBeat å…¨å±€é…ç½®"""
+    """CrowdBeat global settings."""
 
     # --- Spotify OAuth ---
     SPOTIFY_CLIENT_ID: str
@@ -29,18 +27,14 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
 
-    # æŽ¨èç®—æ³•ç‰¹å¾æƒé‡
+    # --- Recommendation tuning ---
     WEIGHT_DANCEABILITY: float = 0.25
     WEIGHT_ENERGY: float = 0.25
     WEIGHT_VALENCE: float = 0.20
     WEIGHT_TEMPO: float = 0.15
     WEIGHT_ACOUSTICNESS: float = 0.10
     WEIGHT_INSTRUMENTALNESS: float = 0.05
-
-    # Cold start é˜ˆå€¼
     COLD_START_THRESHOLD: int = 5
-
-    # æŽ¨èè¿”å›žæ•°é‡
     RECOMMENDATION_LIMIT: int = 20
 
     model_config = {
@@ -52,5 +46,5 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """ç¼“å­˜çš„ Settings å®žä¾‹ï¼Œå…¨å±€å•ä¾‹"""
+    """Return cached settings."""
     return Settings()
