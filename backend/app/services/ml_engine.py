@@ -189,28 +189,48 @@ def _rank_guest_tracks(rows) -> list[dict]:
     _TEMPO_MIN, _TEMPO_MAX = 60.0, 200.0
 
     def _audio_score(row) -> float:
-        def _get(attr: str, default: float) -> float:
+        def _get(attr: str) -> float | None:
             val = getattr(row, attr, None)
-            return float(val) if val is not None else default
+            try:
+                return float(val) if val is not None else None
+            except (TypeError, ValueError):
+                return None
 
-        dance = _get("danceability", 0.5)
-        energy = _get("energy", 0.5)
-        valence = _get("valence", 0.5)
-        raw_tempo = _get("tempo", 120.0)
-        tempo_norm = max(0.0, min(1.0, (raw_tempo - _TEMPO_MIN) / (_TEMPO_MAX - _TEMPO_MIN)))
-        acoustic = _get("acousticness", 0.3)
-        instrumental = _get("instrumentalness", 0.1)
-        popularity = _get("popularity", 50.0) / 100.0
+        dance = _get("danceability")
+        energy = _get("energy")
+        valence = _get("valence")
+        raw_tempo = _get("tempo")
+        acoustic = _get("acousticness")
+        instrumental = _get("instrumentalness")
+        popularity_raw = _get("popularity")
 
-        score = (
-            settings.WEIGHT_DANCEABILITY   * dance
-            + settings.WEIGHT_ENERGY       * energy
-            + settings.WEIGHT_VALENCE      * valence
-            + settings.WEIGHT_TEMPO        * tempo_norm
-            + settings.WEIGHT_ACOUSTICNESS * (1.0 - acoustic)   # lower acousticness = better for parties
-            + settings.WEIGHT_INSTRUMENTALNESS * (1.0 - instrumental)  # vocal tracks preferred
-            + 0.10                         * popularity          # soft popularity tiebreaker
-        )
+        has_audio_features = any(v is not None for v in (dance, energy, valence, raw_tempo))
+
+        if has_audio_features:
+            # Full audio-feature score
+            dance = dance if dance is not None else 0.5
+            energy = energy if energy is not None else 0.5
+            valence = valence if valence is not None else 0.5
+            tempo_norm = max(0.0, min(1.0, ((raw_tempo or 120.0) - _TEMPO_MIN) / (_TEMPO_MAX - _TEMPO_MIN)))
+            acoustic = acoustic if acoustic is not None else 0.3
+            instrumental = instrumental if instrumental is not None else 0.1
+            popularity = (popularity_raw or 50.0) / 100.0
+
+            score = (
+                settings.WEIGHT_DANCEABILITY        * dance
+                + settings.WEIGHT_ENERGY            * energy
+                + settings.WEIGHT_VALENCE           * valence
+                + settings.WEIGHT_TEMPO             * tempo_norm
+                + settings.WEIGHT_ACOUSTICNESS      * (1.0 - acoustic)
+                + settings.WEIGHT_INSTRUMENTALNESS  * (1.0 - instrumental)
+                + 0.10                              * popularity
+            )
+        else:
+            # Audio Features API is unavailable (deprecated) — rank purely by popularity
+            # so tracks at least sort differently rather than all getting the same score.
+            popularity = (popularity_raw or 0.0) / 100.0
+            score = 0.4 + 0.5 * popularity  # range 0.40–0.90, avoids false tie at 0.53
+
         return round(min(1.0, max(0.0, score)), 4)
 
     # Deduplicate by (track_name, artist_name), keep best score
@@ -638,23 +658,33 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
         recommendations_data = _parse_llm_recommendations(response_text)
     except Exception as e:
         print(f"[Gemini Recommendation Error] Cold Start: {e}")
-        if existing_tracks:
-            rows = [
-                type("TrackRow", (), {
-                    "track_name": track.track_name,
-                    "artist_name": track.artist_name,
-                    "popularity": track.popularity,
-                })
-                for track in existing_tracks
-            ]
-            fallback = _rank_guest_tracks(rows)
-            if fallback:
-                return await _save_ranked_tracks(session_id, fallback, db, guest_count, is_cold_start=True)
+        # Always fall back to curated genre seeds — never return the guest's own submitted tracks
+        seeded = _genre_seed_recommendations(genre_seeds)
+        return await _save_ranked_tracks(session_id, seeded, db, guest_count, is_cold_start=True)
+
+    # Build exclusion set from existing_tracks so Gemini's guest_picks
+    # can never echo back the user's own submitted songs.
+    submitted_keys_cold = set()
+    if existing_tracks:
+        for t in existing_tracks:
+            if t.track_name and t.artist_name:
+                submitted_keys_cold.add((t.track_name.strip().lower(), t.artist_name.strip().lower()))
+
+    filtered_data = []
+    for rec in recommendations_data:
+        key = (rec.get("track_name", "").strip().lower(), rec.get("artist_name", "").strip().lower())
+        if key in submitted_keys_cold:
+            print(f"[cold_start] filtered out guest-submitted track: {rec.get('track_name')} - {rec.get('artist_name')}")
+            continue
+        filtered_data.append(rec)
+
+    if not filtered_data:
+        print("[cold_start] all LLM results matched guest tracks, using genre seeds")
         seeded = _genre_seed_recommendations(genre_seeds)
         return await _save_ranked_tracks(session_id, seeded, db, guest_count, is_cold_start=True)
 
     top_n = []
-    for i, rec in enumerate(recommendations_data[:10]):
+    for i, rec in enumerate(filtered_data[:10]):
         source = rec.get("source", "new")
         t_name = rec.get("track_name", "Unknown Track")
         a_name = rec.get("artist_name", "Unknown Artist")
