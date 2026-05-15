@@ -23,13 +23,16 @@ def _get_oauth_manager() -> SpotifyOAuth:
     )
 
 
-def get_authorize_url(session_id: str) -> str:
-    """
-    ç”Ÿæˆ Spotify æŽˆæƒ URL
-    å°† session_id ç¼–ç è¿› state å‚æ•°ï¼Œå›žè°ƒæ—¶å¯æ¢å¤
+def get_authorize_url(session_id: str, oauth_state: str | None = None) -> str:
+    """Create Spotify authorization URL.
+
+    Legacy behavior: if oauth_state is not provided, the OAuth state is set to session_id.
+    New behavior: if oauth_state is provided, it will be used as the OAuth state.
     """
     oauth = _get_oauth_manager()
-    return oauth.get_authorize_url(state=session_id)
+    state = oauth_state if oauth_state is not None else session_id
+    return oauth.get_authorize_url(state=state)
+
 
 
 async def exchange_token(code: str) -> dict:

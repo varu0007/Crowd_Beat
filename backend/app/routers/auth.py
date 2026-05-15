@@ -28,6 +28,36 @@ async def login(session_id: str = Query(..., description="DJ session ID to join"
     return RedirectResponse(url=authorize_url)
 
 
+@router.get("/login_with_profile")
+async def login_with_profile(
+    session_id: str = Query(..., description="DJ session ID to join"),
+    username: str = Query(..., description="Guest username"),
+    email: str = Query(..., description="Guest email"),
+):
+    """Start Spotify OAuth but preserve username/email in the OAuth state."""
+    try:
+        uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session_id format")
+
+    # state must round-trip through Spotify callback.
+    # Keep it compact; backend will decode using json.
+    import json
+    from urllib.parse import quote
+
+    state_payload = {
+        "v": 1,
+        "session_id": session_id,
+        "username": username,
+        "email": email,
+    }
+    state = quote(json.dumps(state_payload, separators=(",", ":")))
+
+    authorize_url = spotify_service.get_authorize_url(session_id=session_id, oauth_state=state)
+    return RedirectResponse(url=authorize_url)
+
+
+
 @router.get("/callback")
 async def callback(
     code: str = Query(...),
@@ -39,10 +69,27 @@ async def callback(
 
     # ---
     session_id_str = state
+
+    # New profile-carrying state: urlencoded JSON.
+    # Legacy state: raw session_id uuid.
+    import json
+    from urllib.parse import unquote
+
+    decoded = None
+    try:
+        decoded_candidate = unquote(state)
+        decoded = json.loads(decoded_candidate)
+    except Exception:
+        decoded = None
+
+    if decoded and decoded.get('v') == 1:
+        session_id_str = decoded.get('session_id')
+    
     try:
         session_id = uuid.UUID(session_id_str)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid state (session_id)")
+
 
     # ---
     session_result = await db.execute(

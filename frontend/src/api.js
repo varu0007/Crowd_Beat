@@ -38,6 +38,16 @@ export const api = {
   djLogin: (sessionId) =>
     `${API_BASE}/auth/dj/login?session_id=${sessionId}`,
 
+  // Guest Spotify OAuth that also captures username + email via OAuth state
+  guestLoginWithProfileUrl: (sessionId, profile) => {
+    const params = new URLSearchParams();
+    params.set('session_id', sessionId);
+    if (profile?.username) params.set('username', profile.username);
+    if (profile?.email) params.set('email', profile.email);
+    return `${API_BASE}/auth/login_with_profile?${params.toString()}`;
+  },
+
+
   createPlaylist: (sessionId, playlistName) =>
     fetch(`${API_BASE}/host/session/${sessionId}/playlist/create`, {
       method: 'POST',
@@ -74,6 +84,12 @@ export const api = {
   // Guest
   guestLoginUrl: (sessionId) =>
     `${API_BASE}/auth/login?session_id=${sessionId}`,
+
+  // Guest profile CSV rows for download
+  getGuestProfileCsvRows: (guestId) =>
+    fetch(`${API_BASE}/guest/${guestId}/profile-csv`).then(r => r.json()),
+
+
 
   getGuestPlaylists: (guestId) =>
     fetch(`${API_BASE}/guest/${guestId}/playlists`).then(r => {

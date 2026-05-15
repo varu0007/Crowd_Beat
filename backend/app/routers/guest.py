@@ -23,6 +23,7 @@ class TrackSelection(BaseModel):
 
 @router.get("/{guest_id}/playlists")
 async def get_playlists(guest_id: str, db: AsyncSession = Depends(get_db)):
+
     try:
         gid = uuid.UUID(guest_id)
     except ValueError:
@@ -162,8 +163,34 @@ async def get_playlist_tracks(guest_id: str, playlist_id: str, db: AsyncSession 
     return {"playlist_id": playlist_id, "tracks": tracks}
 
 
+@router.get("/{guest_id}/profile-csv")
+async def get_profile_csv_rows(guest_id: str, db: AsyncSession = Depends(get_db)):
+    """Return CSV rows (as JSON) for the guest profile (username/email).
+
+    Frontend will convert to CSV and download.
+    """
+    try:
+        gid = uuid.UUID(guest_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid guest_id")
+
+    result = await db.execute(select(Guest).where(Guest.id == gid))
+    guest = result.scalar_one_or_none()
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    display_name = guest.display_name or ""
+    email = getattr(guest, "email", "") or ""
+
+    return [{
+        "username": display_name,
+        "email": email,
+    }]
+
+
 @router.post("/{guest_id}/tracks")
 async def submit_tracks(
+
     guest_id: str,
     payload: TrackSelection,
     background_tasks: BackgroundTasks,
