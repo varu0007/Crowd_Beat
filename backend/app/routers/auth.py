@@ -117,15 +117,18 @@ async def callback(
         raise HTTPException(status_code=400, detail=f"Failed to get user info: {e}")
 
     # ---
+    # Spotify "email" may be unavailable unless the user grants the correct scope.
+    # Avoid hard failure by making it optional.
     guest = Guest(
         session_id=session_id,
         spotify_user_id=user_info["spotify_user_id"],
         display_name=user_info["display_name"],
-        email=user_info.get("email"),
+        email=user_info.get("email") or "",
         access_token=token_info["access_token"],
         refresh_token=token_info["refresh_token"],
         token_expires_at=token_info["expires_at"],
     )
+
 
     db.add(guest)
     await db.flush()  # ---
