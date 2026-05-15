@@ -182,6 +182,7 @@ async def get_profile_csv_rows(guest_id: str, db: AsyncSession = Depends(get_db)
     display_name = guest.display_name or ""
     email = getattr(guest, "email", "") or ""
 
+
     return [{
         "username": display_name,
         "email": email,

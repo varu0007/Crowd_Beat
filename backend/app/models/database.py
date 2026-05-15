@@ -108,7 +108,9 @@ class Guest(Base):
     )
     spotify_user_id: Mapped[Optional[str]] = mapped_column(String(100))
     display_name: Mapped[Optional[str]] = mapped_column(String(200))
+    email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     access_token: Mapped[Optional[str]] = mapped_column(Text)
+
     refresh_token: Mapped[Optional[str]] = mapped_column(Text)
     token_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True)

@@ -121,10 +121,12 @@ async def callback(
         session_id=session_id,
         spotify_user_id=user_info["spotify_user_id"],
         display_name=user_info["display_name"],
+        email=user_info.get("email"),
         access_token=token_info["access_token"],
         refresh_token=token_info["refresh_token"],
         token_expires_at=token_info["expires_at"],
     )
+
     db.add(guest)
     await db.flush()  # ---
 
