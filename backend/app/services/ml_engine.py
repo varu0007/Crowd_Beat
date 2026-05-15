@@ -97,9 +97,25 @@ def _normalize_track(item: dict) -> dict | None:
     if not track_name or not artist_name:
         return None
 
+    track_name_str = str(track_name).strip()
+    artist_name_str = str(artist_name).strip()
+
+    # Filter out gibberish/mojibake or non-Latin
+    def is_gibberish(text: str) -> bool:
+        if any(0x4E00 <= ord(c) <= 0x9FFF for c in text):
+            return True
+        mojibake_patterns = ["ç»", "æŸ", "å¯", "æ´", "¾å", "œæ", "±å", "ä¸", "å›", "é¢"]
+        if any(p in text for p in mojibake_patterns):
+            return True
+        return False
+
+    if is_gibberish(track_name_str) or is_gibberish(artist_name_str):
+        print(f"[recommendations] filtered out gibberish track: {track_name_str} - {artist_name_str}")
+        return None
+
     return {
-        "track_name": str(track_name).strip(),
-        "artist_name": str(artist_name).strip(),
+        "track_name": track_name_str,
+        "artist_name": artist_name_str,
         "reason": str(item.get("reason", "")),
         "source": str(item.get("source", "new")).lower(),
     }
@@ -147,7 +163,7 @@ def _parse_llm_recommendations(response_text: str) -> list[dict]:
         parsed_json = json.loads(match.group(0))
 
     recommendations_data = []
-    for item in _extract_recommendation_items(parsed_json)[:10]:
+    for item in _extract_recommendation_items(parsed_json)[:20]:
         normalized = _normalize_track(item)
         if normalized:
             recommendations_data.append(normalized)
@@ -250,7 +266,7 @@ def _rank_guest_tracks(rows) -> list[dict]:
             }
 
     ranked = sorted(best.values(), key=lambda item: item["score"], reverse=True)
-    return ranked[:10]
+    return ranked[:20]
 
 
 def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
@@ -267,6 +283,16 @@ def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
             ("Prada", "casso, RAYE & D-Block Europe"),
             ("Both", "Tiesto & BIA"),
             ("Ray Of Solar", "Swedish House Mafia"),
+            ("Breathe", "The Prodigy"),
+            ("One More Time", "Daft Punk"),
+            ("Strobe", "deadmau5"),
+            ("Animals", "Martin Garrix"),
+            ("Titanium", "David Guetta & Sia"),
+            ("Levels", "Avicii"),
+            ("Wake Me Up", "Avicii"),
+            ("Don't You Worry Child", "Swedish House Mafia"),
+            ("Clarity", "Zedd"),
+            ("Summer", "Calvin Harris"),
         ]
     elif "hip" in genre_text or "rap" in genre_text:
         picks = [
@@ -280,6 +306,16 @@ def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
             ("Surround Sound", "JID feat. 21 Savage & Baby Tate"),
             ("Players", "Coi Leray"),
             ("Tomorrow 2", "GloRilla & Cardi B"),
+            ("Sicko Mode", "Travis Scott"),
+            ("Humble", "Kendrick Lamar"),
+            ("God's Plan", "Drake"),
+            ("In Da Club", "50 Cent"),
+            ("Lose Yourself", "Eminem"),
+            ("Gold Digger", "Kanye West"),
+            ("Niggas In Paris", "JAY-Z & Kanye West"),
+            ("Bodak Yellow", "Cardi B"),
+            ("Rockstar", "Post Malone"),
+            ("Hotline Bling", "Drake"),
         ]
     elif "pop" in genre_text:
         picks = [
@@ -293,6 +329,16 @@ def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
             ("Cruel Summer", "Taylor Swift"),
             ("Flowers", "Miley Cyrus"),
             ("Dance The Night", "Dua Lipa"),
+            ("Bad Guy", "Billie Eilish"),
+            ("Shape of You", "Ed Sheeran"),
+            ("Uptown Funk", "Mark Ronson & Bruno Mars"),
+            ("Blinding Lights", "The Weeknd"),
+            ("As It Was", "Harry Styles"),
+            ("Levitating", "Dua Lipa"),
+            ("Watermelon Sugar", "Harry Styles"),
+            ("Shake It Off", "Taylor Swift"),
+            ("Anti-Hero", "Taylor Swift"),
+            ("Good 4 U", "Olivia Rodrigo"),
         ]
     else:
         picks = [
@@ -306,6 +352,16 @@ def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
             ("greedy", "Tate McRae"),
             ("Miracle", "Calvin Harris & Ellie Goulding"),
             ("Disconnect", "Becky Hill & Chase & Status"),
+            ("Blinding Lights", "The Weeknd"),
+            ("Levitating", "Dua Lipa"),
+            ("Sicko Mode", "Travis Scott"),
+            ("God's Plan", "Drake"),
+            ("Levels", "Avicii"),
+            ("Wake Me Up", "Avicii"),
+            ("As It Was", "Harry Styles"),
+            ("Shape of You", "Ed Sheeran"),
+            ("Bad Guy", "Billie Eilish"),
+            ("Uptown Funk", "Mark Ronson"),
         ]
 
     results = []
@@ -448,7 +504,7 @@ async def recompute(
 
     guest_lines = []
     for guest_name, tracks in guest_tracks_map.items():
-        limited_tracks = tracks[:10]
+        limited_tracks = tracks[:20]
         track_strs = [f"{t['track']} - {t['artist']}" for t in limited_tracks]
         guest_lines.append(f"Guest '{guest_name}' likes: " + ", ".join(track_strs))
 
@@ -503,7 +559,7 @@ Guests' musical tastes (for reference only, NEVER use this to break the DJ's gen
 ALREADY ADDED TO PLAYLIST (CRITICAL: DO NOT RECOMMEND THESE SONGS AGAIN):
 {already_added_text}
 
-Please recommend exactly 10 songs suitable for the current party.
+Please recommend exactly 20 songs suitable for the current party.
 CRITICAL Recommendation Requirements:
 - NO HALLUCINATIONS / REAL SINGLES ONLY: You MUST recommend verified, real, individual song tracks. Do NOT recommend compilation albums, generic genre labels, or playlist titles.
 - DO NOT INVENT SONGS: If the internet context does not contain enough clear, unambiguous song names, IGNORE THE CONTEXT and use your own pre-trained knowledge. NEVER invent song titles or use placeholders like "New Artist".
@@ -511,9 +567,10 @@ CRITICAL Recommendation Requirements:
 - TIME FRAME: Prefer songs released after 2020. Avoid songs older than 2015 unless they are absolute classics that still work in a party setting. Do NOT hallucinate release years. If you are unsure when a song was released, omit the year.
 - GENRE: The songs MUST strictly align with the DJ's set genres: {genre_str}.
 - AVOID OUTDATED SONGS: Absolutely NO cliche, overplayed, or outdated generic party anthems.
-- SONG MIX RATIO (5:5): You MUST provide exactly 10 songs total. Exactly 5 songs MUST be brand new hits (NOT from the guests' list). Exactly 5 songs in 'guest_picks' MUST be NEW songs inspired by the guests' musical taste — songs the guests would love but that DO NOT appear anywhere in their submitted tracks list above.
-- CRITICAL: NEITHER new_hits NOR guest_picks may contain any song that appears in the guests' submitted tracks list above. All 10 recommendations must be fresh discoveries the guests haven't already submitted.
+- SONG MIX RATIO (10:10): You MUST provide exactly 20 songs total. Exactly 10 songs MUST be brand new hits (NOT from the guests' list). Exactly 10 songs in 'guest_picks' MUST be NEW songs inspired by the guests' musical taste — songs the guests would love but that DO NOT appear anywhere in their submitted tracks list above.
+- CRITICAL: NEITHER new_hits NOR guest_picks may contain any song that appears in the guests' submitted tracks list above. All 20 recommendations must be fresh discoveries the guests haven't already submitted.
 - IMPORTANT: There must be ZERO overlap between new_hits and guest_picks. Every song must appear exactly once across both lists combined.
+- LANGUAGE: MUST use English / Latin characters only. NO Chinese, Japanese, Cyrillic, or mojibake.
 - Ensure the vibe is suitable for a live party atmosphere within the specific requested genres.
 
 VALIDATION RULES (apply before returning):
@@ -617,7 +674,7 @@ async def _cold_start_fallback(
     genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
     crowd_summary = ""
     if existing_tracks:
-        track_names = [f"{t.track_name} - {t.artist_name}" for t in existing_tracks[:10]]
+        track_names = [f"{t.track_name} - {t.artist_name}" for t in existing_tracks[:20]]
         crowd_summary = ", ".join(track_names)
 
     print(f"[debug] fetching internet context for {genre_str}...")
@@ -639,7 +696,7 @@ Then recommend real songs by these artists that you know with certainty exist.
 ALREADY ADDED TO PLAYLIST (CRITICAL: DO NOT RECOMMEND THESE SONGS AGAIN):
 {already_added_text}
 
-Please strictly recommend 10 songs in the {genre_str} style.
+Please strictly recommend 20 songs in the {genre_str} style.
 CRITICAL Requirements:
 - NO HALLUCINATIONS / REAL SINGLES ONLY: You MUST recommend verified, real, individual song tracks. Do NOT recommend compilation albums, generic genre labels, or playlist titles.
 - DO NOT INVENT SONGS: If the internet context lacks enough real songs, rely on your internal knowledge. NEVER invent songs or use "New Artist".
@@ -647,10 +704,11 @@ CRITICAL Requirements:
 - TIME FRAME: Prefer songs released after 2020. Avoid songs older than 2015 unless they are absolute classics that still work in a party setting. Do NOT hallucinate release years. If you are unsure when a song was released, omit the year.
 - GENRE: MUST be strictly of the {genre_str} style.
 - AVOID OUTDATED SONGS: Absolutely NO cliche, overplayed, or outdated generic party anthems.
-- SONG MIX RATIO (5:5): You MUST provide exactly 10 songs total. Exactly 5 songs MUST be brand new hits. Exactly 5 songs in 'guest_picks' MUST be NEW songs inspired by the existing guests' musical taste — songs they would love but that DO NOT appear anywhere in their submitted tracks listed above.
-- CRITICAL: NEITHER new_hits NOR guest_picks may contain any song that appears in the guests' submitted tracks list above. All 10 recommendations must be fresh discoveries.
+- SONG MIX RATIO (10:10): You MUST provide exactly 20 songs total. Exactly 10 songs MUST be brand new hits. Exactly 10 songs in 'guest_picks' MUST be NEW songs inspired by the existing guests' musical taste — songs they would love but that DO NOT appear anywhere in their submitted tracks listed above.
+- CRITICAL: NEITHER new_hits NOR guest_picks may contain any song that appears in the guests' submitted tracks list above. All 20 recommendations must be fresh discoveries.
 - CRITICAL for new_hits: These MUST be songs that are NOT in the guest's submitted tracks. These are fresh DJ discoveries from the internet search context. Do NOT pick songs from the guest's list for new_hits under any circumstances.
 - IMPORTANT: There must be ZERO overlap between new_hits and guest_picks. Every song must appear exactly once across both lists combined.
+- LANGUAGE: MUST use English / Latin characters only. NO Chinese, Japanese, Cyrillic, or mojibake.
 - Ensure the vibe is suitable for a live party atmosphere within the requested genre constraints.
 
 VALIDATION RULES (apply before returning):
@@ -695,7 +753,7 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
         return await _save_ranked_tracks(session_id, seeded, db, guest_count, is_cold_start=True)
 
     top_n = []
-    for i, rec in enumerate(filtered_data[:10]):
+    for i, rec in enumerate(filtered_data[:20]):
         source = rec.get("source", "new")
         t_name = rec.get("track_name", "Unknown Track")
         a_name = rec.get("artist_name", "Unknown Artist")
