@@ -356,6 +356,12 @@ async def recompute(
     already_added_strs = [f"{r.track_name} - {r.artist_name}" for r in playlist_rows]
     already_added_text = "\n".join(already_added_strs) if already_added_strs else "None"
 
+    playlist_keys = {
+        (row.track_name.strip().lower(), row.artist_name.strip().lower())
+        for row in playlist_rows
+        if row.track_name and row.artist_name
+    }
+
     # Fetch audio features alongside track info so scoring and prompts can use them
     stmt = text("""
         SELECT
@@ -388,7 +394,7 @@ async def recompute(
         db_session = session_result.scalar_one_or_none()
         if not db_session:
             return []
-        return await _cold_start_fallback(session_id, db_session, db, guest_count, [], already_added_text)
+        return await _cold_start_fallback(session_id, db_session, db, guest_count, [], already_added_text, playlist_keys)
 
     # Below guest threshold -> cold start (may still use existing tracks as hints)
     if guest_count < settings.COLD_START_THRESHOLD:
@@ -403,7 +409,7 @@ async def recompute(
             select(GuestTrack).join(Guest, GuestTrack.guest_id == Guest.id).where(Guest.session_id == session_id)
         )
         all_tracks = tracks_result.scalars().all()
-        return await _cold_start_fallback(session_id, db_session, db, guest_count, all_tracks, already_added_text)
+        return await _cold_start_fallback(session_id, db_session, db, guest_count, all_tracks, already_added_text, playlist_keys)
 
     # ------------------------------------------------------------------ #
     # Warm-start: build per-guest track lists + aggregate audio features  #
@@ -537,6 +543,7 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
         for row in rows
         if row.track_name and row.artist_name
     }
+    submitted_keys.update(playlist_keys)
 
     filtered_recommendations = []
     for item in recommendations_data:
@@ -603,6 +610,7 @@ async def _cold_start_fallback(
     guest_count: int,
     existing_tracks: list[GuestTrack] = None,
     already_added_text: str = "None",
+    playlist_keys: set = None,
 ) -> list[dict]:
     """Generate cold-start recommendations when guest data is sparse."""
     genre_seeds = db_session.genre_seeds or []
@@ -669,6 +677,9 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
         for t in existing_tracks:
             if t.track_name and t.artist_name:
                 submitted_keys_cold.add((t.track_name.strip().lower(), t.artist_name.strip().lower()))
+
+    if playlist_keys:
+        submitted_keys_cold.update(playlist_keys)
 
     filtered_data = []
     for rec in recommendations_data:
