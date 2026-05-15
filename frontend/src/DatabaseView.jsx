@@ -337,6 +337,45 @@ export default function DatabaseView() {
                       <td>{formatDate(item.joined_at)}</td>
                       <td className="actions-cell">
                         <button className="nb-btn nb-btn--small nb-btn--ghost" onClick={() => navigateToTracks(item.id)} style={{ marginRight: '8px' }}>{t.btnViewTracks}</button>
+
+                        <button
+                          className="nb-btn nb-btn--small nb-btn--primary"
+                          style={{ marginRight: '8px' }}
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(`${API_BASE}/guest/${item.id}/profile-csv`);
+                              if (!res.ok) throw new Error(await res.text());
+                              const rows = await res.json();
+
+                              const headers = Object.keys(rows[0] || {});
+                              const escape = (v) => {
+                                const s = String(v ?? '');
+                                if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+                                return s;
+                              };
+
+                              const csv = [
+                                headers.join(','),
+                                ...rows.map(r => headers.map(h => escape(r[h])).join(',')),
+                              ].join('\n');
+
+                              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `guest_profile_${item.id}.csv`;
+                              document.body.appendChild(a);
+                              a.click();
+                              a.remove();
+                              URL.revokeObjectURL(url);
+                            } catch (e) {
+                              alert(`CSV download failed: ${e.message || e}`);
+                            }
+                          }}
+                        >
+                          Download CSV
+                        </button>
+
                         <button className="nb-btn nb-btn--small nb-btn--danger" onClick={() => handleDeleteGuest(item.id)}>{t.btnDelete}</button>
                       </td>
                     </tr>
