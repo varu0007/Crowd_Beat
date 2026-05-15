@@ -46,55 +46,8 @@ export default function DJWorkstation() {
         setAddedTracks(new Set(data.tracks.map(t => t.spotify_track_id)));
       }
     }).catch(() => {});
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useCrowdBeatWS } from './hooks/useCrowdBeatWS';
-import { api } from './api';
-import { useI18n } from './i18n';
-import { Mic, CheckCircle2, XCircle, Headphones } from 'lucide-react';
-
-export default function DJWorkstation() {
-  const { t } = useI18n();
-  const { sessionId } = useParams();
-  const navigate = useNavigate();
-
-  const [djConnected, setDjConnected] = useState(false);
-  const [addedTracks, setAddedTracks] = useState(new Set());
-  const [playlistTracks, setPlaylistTracks] = useState([]);
-  const [error, setError] = useState(null);
-
-  const [recHistory, setRecHistory] = useState([]);
-  const [historyIdx, setHistoryIdx] = useState(0);
-
-  const { recommendations, guestCount, isConnected } = useCrowdBeatWS(sessionId);
-
-  // Keep track of recommendation history
-  useEffect(() => {
-    if (recommendations && recommendations.length > 0) {
-      setRecHistory(prev => {
-        if (prev.length > 0) {
-          const lastBatch = prev[prev.length - 1];
-          // avoid duplicate consecutive batches
-          if (lastBatch.length === recommendations.length && lastBatch[0]?.spotify_track_id === recommendations[0]?.spotify_track_id) {
-            return prev;
-          }
-        }
-        const newHistory = [...prev, recommendations];
-        setHistoryIdx(newHistory.length - 1);
-        return newHistory;
-      });
-    }
-  }, [recommendations]);
-
-  // Load tracks
-  useEffect(() => {
-    api.getDjPlaylistTracks(sessionId).then(data => {
-      if (data.tracks) {
-        setPlaylistTracks(data.tracks);
-        setAddedTracks(new Set(data.tracks.map(t => t.spotify_track_id)));
-      }
-    }).catch(() => {});
   }, [sessionId]);
+
 
   const handleAddTrack = async (track) => {
     const trackId = track.spotify_track_id;
