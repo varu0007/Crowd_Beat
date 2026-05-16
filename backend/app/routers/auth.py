@@ -64,6 +64,7 @@ async def login_with_profile(
         db.add(guest_info)
         await db.commit()
     except Exception as e:
+        await db.rollback()
         print(f"Failed to save guest info: {e}")
 
     authorize_url = spotify_service.get_authorize_url(session_id=session_id, oauth_state=state)
