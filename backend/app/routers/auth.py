@@ -33,6 +33,7 @@ async def login_with_profile(
     session_id: str = Query(..., description="DJ session ID to join"),
     username: str = Query(..., description="Guest username"),
     email: str = Query(..., description="Guest email"),
+    db: AsyncSession = Depends(get_db),
 ):
     """Start Spotify OAuth but preserve username/email in the OAuth state."""
     try:
@@ -52,6 +53,18 @@ async def login_with_profile(
         "email": email,
     }
     state = quote(json.dumps(state_payload, separators=(",", ":")))
+
+    from app.models.database import GuestInfo
+    try:
+        guest_info = GuestInfo(
+            session_id=uuid.UUID(session_id),
+            username=username,
+            email=email
+        )
+        db.add(guest_info)
+        await db.commit()
+    except Exception as e:
+        print(f"Failed to save guest info: {e}")
 
     authorize_url = spotify_service.get_authorize_url(session_id=session_id, oauth_state=state)
     return RedirectResponse(url=authorize_url)

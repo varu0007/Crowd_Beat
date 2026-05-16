@@ -183,6 +183,20 @@ class Recommendation(Base):
     session: Mapped["Session"] = relationship(back_populates="recommendations")
 
 
+class GuestInfo(Base):
+    """Stores guest details for manual whitelisting."""
+    __tablename__ = "guest_info"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True
+    )
+    username: Mapped[str] = mapped_column(String(200))
+    email: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
 # ---
 # Async Engine & Session Factory
 # ---

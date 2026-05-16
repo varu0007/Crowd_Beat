@@ -301,3 +301,35 @@ async def list_playlist_tracks(
         }
         for t in tracks
     ]
+
+# ---
+
+@router.get("/guest_info")
+async def list_guest_info(
+    session_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Internal helper to retrieve manual guest inputs."""
+    from app.models.database import GuestInfo
+    stmt = select(GuestInfo).order_by(GuestInfo.created_at.desc()).limit(200)
+
+    if session_id:
+        try:
+            sid = uuid.UUID(session_id)
+            stmt = stmt.where(GuestInfo.session_id == sid)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session_id")
+
+    result = await db.execute(stmt)
+    records = result.scalars().all()
+
+    return [
+        {
+            "id": r.id,
+            "session_id": str(r.session_id) if r.session_id else None,
+            "username": r.username,
+            "email": r.email,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in records
+    ]

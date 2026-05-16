@@ -51,6 +51,8 @@ export default function DatabaseView() {
         result = await adminApi.getRecommendations(sessionFilter);
       } else if (activeTab === 'playlist_tracks') {
         result = await adminApi.getPlaylistTracks(sessionFilter);
+      } else if (activeTab === 'guest_info') {
+        result = await adminApi.getGuestInfo(sessionFilter);
       }
       setData(result);
     } catch (err) {
@@ -167,7 +169,7 @@ export default function DatabaseView() {
         </div>
       )}
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-        {['sessions', 'guests', 'tracks', 'recommendations', 'playlist_tracks'].map(tab => (
+        {['sessions', 'guests', 'guest_info', 'tracks', 'recommendations', 'playlist_tracks'].map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -378,6 +380,32 @@ export default function DatabaseView() {
 
                         <button className="nb-btn nb-btn--small nb-btn--danger" onClick={() => handleDeleteGuest(item.id)}>{t.btnDelete}</button>
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </>
+            )}
+
+            {/* === GUEST INFO (Manual Whitelist Requests) === */}
+            {activeTab === 'guest_info' && (
+              <>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>{t.colSessionId || 'Session ID'}</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Requested At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map(item => (
+                    <tr key={item.id}>
+                      <td style={{ fontWeight: 'bold' }}>{item.id}</td>
+                      <td title={item.session_id}>{truncate(item.session_id)}</td>
+                      <td style={{ fontWeight: 'bold' }}>{item.username}</td>
+                      <td style={{ color: '#1DB954', fontWeight: 'bold' }}>{item.email}</td>
+                      <td>{formatDate(item.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -127,6 +127,7 @@ export const api = {
   admin: {
     getSessions: () => fetch(`${API_BASE}/admin/sessions`).then(r => r.json()),
     getGuests: (sid) => fetch(`${API_BASE}/admin/guests${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
+    getGuestInfo: (sid) => fetch(`${API_BASE}/admin/guest_info${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
     getTracks: (gid, sid) => {
       const params = new URLSearchParams();
       if (gid) params.append('guest_id', gid);
