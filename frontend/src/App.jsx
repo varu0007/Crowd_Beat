@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import DatabaseView from './DatabaseView.jsx';
-import HostDashboard from './HostDashboard.jsx';
+
+import Home from './Home.jsx';
+import PartyLobby from './PartyLobby.jsx';
+import DJWorkstation from './DJWorkstation.jsx';
+import DisplayScreen from './DisplayScreen.jsx';
 import GuestEntry from './GuestEntry.jsx';
 import GuestSuccess from './GuestSuccess.jsx';
 import GuestPlaylistSelect from './GuestPlaylistSelect.jsx';
 import { addSongsBatch, spotifyTrackToSong, mergeAudioFeatures } from './db.js';
 import { useI18n } from './i18n.jsx';
+import { User, Disc, Loader2 } from 'lucide-react';
 
 // --- PKCE 辅助函数 ---
 const generateRandomString = (length) => {
@@ -671,10 +676,10 @@ function SpotifyFetcher() {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: '900', fontSize: '1.1rem' }}>{track.name}</div>
                   <div style={{ fontSize: '0.9rem', color: '#555' }}>
-                    👤 {track.artists ? track.artists.map(a => a.name).join(', ') : 'Unknown Artist'}
+                    <User size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 4 }} /> {track.artists ? track.artists.map(a => a.name).join(', ') : 'Unknown Artist'}
                   </div>
                   <div style={{ fontSize: '0.9rem', color: '#777' }}>
-                    💿 {track.album ? track.album.name : (track.show ? track.show.name : 'Unknown Album')}
+                    <Disc size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 4 }} /> {track.album ? track.album.name : (track.show ? track.show.name : 'Unknown Album')}
                   </div>
                 </div>
               </div>
@@ -695,8 +700,15 @@ function CallbackHandler() {
     const code = urlParams.get('code');
     const state = urlParams.get('state'); // Need state for session mapping
     if (code) {
-      // 临时代理：前端收到 code 后，瞬间重定向给后端，欺骗 Spotify 的重定向校验
-      window.location.href = `http://localhost:8000/auth/callback?code=${code}&state=${state}`;
+      // Check if this is a DJ PKCE flow callback (legacy)
+      if (state && state.startsWith('dj_host')) {
+        // Legacy DJ PKCE flow — redirect to home
+        navigate('/', { replace: true });
+      } else {
+        // Guest flow: forward to backend
+        const apiUrl = `http://${window.location.hostname}:8000`;
+        window.location.href = `${apiUrl}/auth/callback?code=${code}&state=${state}`;
+      }
     } else {
       navigate('/', { replace: true });
     }
@@ -705,7 +717,9 @@ function CallbackHandler() {
   return (
     <div className="page-container">
       <div className="nb-card" style={{ textAlign: 'center', padding: '60px' }}>
-        <div style={{ fontSize: '2rem', fontWeight: '900' }}>⏳</div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <Loader2 size={48} className="animate-spin" />
+        </div>
         <div style={{ fontWeight: '700', marginTop: '12px' }}>Authenticating...</div>
       </div>
     </div>
@@ -760,8 +774,11 @@ export default function App() {
 
       {/* Routes */}
       <Routes>
-        <Route path="/" element={<Navigate to="/host" replace />} />
-        <Route path="/host" element={<HostDashboard />} />
+        <Route path="/" element={<Home />} />
+        <Route path="/party/:sessionId" element={<PartyLobby />} />
+        <Route path="/dj/:sessionId" element={<DJWorkstation />} />
+        <Route path="/display/:sessionId" element={<DisplayScreen />} />
+
         <Route path="/join/:sessionId" element={<GuestEntry />} />
         <Route path="/guest-success" element={<GuestSuccess />} />
         <Route path="/guest/:guestId" element={<GuestPlaylistSelect />} />

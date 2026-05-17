@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models.database import get_db, Guest, GuestTrack, Session as DBSession
 from app.services import spotify_service, crowd_engine
+from spotipy.oauth2 import SpotifyOAuth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -103,4 +104,78 @@ async def callback(
 
     # 重定向到前端歌单选择页面
     redirect_url = f"{settings.FRONTEND_URL}/guest/{guest.id}?session_id={session_id_str}"
+    return RedirectResponse(url=redirect_url)
+
+
+# ── DJ OAuth Flow ──
+
+def _get_dj_oauth_manager() -> SpotifyOAuth:
+    """创建 DJ 专用 SpotifyOAuth（需要 playlist-modify 权限）"""
+    settings = get_settings()
+    # DJ OAuth 回调指向后端 /auth/dj/callback
+    # 从 FRONTEND_URL 推断后端地址（同主机 port 8000）
+    import re
+    base = re.sub(r':\d+$', ':8000', settings.FRONTEND_URL)
+    dj_redirect_uri = f"{base}/auth/dj/callback"
+    return SpotifyOAuth(
+        client_id=settings.SPOTIFY_CLIENT_ID,
+        client_secret=settings.SPOTIFY_CLIENT_SECRET,
+        redirect_uri=dj_redirect_uri,
+        scope="playlist-modify-public playlist-modify-private user-read-private",
+        show_dialog=True,
+        open_browser=False,
+    )
+
+
+@router.get("/dj/login")
+async def dj_login(session_id: str = Query(..., description="DJ session ID")):
+    """DJ 连接 Spotify — 生成授权 URL"""
+    try:
+        uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session_id format")
+
+    oauth = _get_dj_oauth_manager()
+    # state 前缀 dj_ 区分 DJ 和 Guest 回调
+    authorize_url = oauth.get_authorize_url(state=f"dj_{session_id}")
+    return RedirectResponse(url=authorize_url)
+
+
+@router.get("/dj/callback")
+async def dj_callback(
+    code: str = Query(...),
+    state: str = Query(""),
+):
+    """DJ Spotify OAuth 回调 — 换取 token 并缓存"""
+    settings = get_settings()
+
+    # 从 state 恢复 session_id（格式：dj_{session_id}）
+    if not state.startswith("dj_"):
+        raise HTTPException(status_code=400, detail="Invalid state for DJ callback")
+
+    session_id_str = state[3:]  # 去掉 "dj_" 前缀
+    try:
+        uuid.UUID(session_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session_id in state")
+
+    # 换取 token
+    oauth = _get_dj_oauth_manager()
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        token_info = await loop.run_in_executor(
+            None, lambda: oauth.get_access_token(code, as_dict=True, check_cache=False)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"DJ token exchange failed: {e}")
+
+    access_token = token_info["access_token"]
+
+    # 缓存到 dj_playlist 模块
+    from app.routers.dj_playlist import _session_dj_tokens
+    _session_dj_tokens[session_id_str] = access_token
+
+    # 重定向回前端 DJ 工作台
+    redirect_url = f"{settings.FRONTEND_URL}/dj/{session_id_str}?dj_connected=true"
     return RedirectResponse(url=redirect_url)

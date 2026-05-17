@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { api } from '../api'
 
 export function useCrowdBeatWS(sessionId) {
   const [recommendations, setRecommendations] = useState([])
@@ -11,8 +12,7 @@ export function useCrowdBeatWS(sessionId) {
 
   const connect = useCallback(() => {
     if (!sessionId) return
-    const WS_BASE = import.meta.env.VITE_WS_URL
-    const ws = new WebSocket(`${WS_BASE}/ws/${sessionId}`)
+    const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/${sessionId}`);
     wsRef.current = ws
 
     ws.onopen = () => { setIsConnected(true); retryRef.current = 0 }
@@ -46,6 +46,16 @@ export function useCrowdBeatWS(sessionId) {
 
   useEffect(() => {
     if (!sessionId) return
+    
+    // Fetch initial state
+    api.getRecommendations(sessionId)
+      .then(data => {
+        setRecommendations(data.recommendations ?? [])
+        setGuestCount(data.guest_count ?? 0)
+        setIsColdStart(data.is_cold_start ?? false)
+      })
+      .catch(console.error)
+
     connect()
     return () => {
       retryRef.current = MAX_RETRY  // 阻止 cleanup 后继续重连

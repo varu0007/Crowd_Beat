@@ -147,24 +147,28 @@ async def get_recommendations_by_seeds(
     seed_genres: list[str] = None,
     seed_tracks: list[str] = None,
     limit: int = 20,
+    target_features: dict = None,
 ) -> list[dict]:
     """
-    Cold start fallback：通过 genre/track seed 获取 Spotify 推荐
-    返回: [{spotify_track_id, track_name, artist_name, popularity}]
+    Content-based recommendations via Spotify API.
+    target_features: {danceability, energy, valence, tempo, acousticness, instrumentalness}
+    Returns: [{spotify_track_id, track_name, artist_name, popularity}]
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
 
     kwargs = {"limit": limit}
     if seed_genres:
-        kwargs["seed_genres"] = seed_genres[:5]  # Spotify 最多 5 个 seed
+        kwargs["seed_genres"] = seed_genres[:5]
     if seed_tracks:
         kwargs["seed_tracks"] = seed_tracks[:5]
+    if target_features:
+        for key, val in target_features.items():
+            if val is not None:
+                kwargs[f"target_{key}"] = round(float(val), 4)
 
     try:
-        results = await loop.run_in_executor(
-            None, lambda: sp.recommendations(**kwargs)
-        )
+        results = await loop.run_in_executor(None, lambda: sp.recommendations(**kwargs))
     except Exception as e:
         print(f"[spotify_service] recommendations error: {e}")
         return []

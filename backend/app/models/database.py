@@ -71,6 +71,32 @@ class Session(Base):
     recommendations: Mapped[List["Recommendation"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
+    playlist_tracks: Mapped[List["PlaylistTrack"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+
+class PlaylistTrack(Base):
+    """DJ 内部虚拟歌单记录"""
+    __tablename__ = "playlist_tracks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    spotify_track_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    track_name: Mapped[Optional[str]] = mapped_column(String(300))
+    artist_name: Mapped[Optional[str]] = mapped_column(String(300))
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    # Relationships
+    session: Mapped["Session"] = relationship(back_populates="playlist_tracks")
+
+    __table_args__ = (
+        Index("ix_playlist_tracks_session_id", "session_id"),
+    )
+
 
 
 class Guest(Base):
@@ -85,6 +111,7 @@ class Guest(Base):
     )
     spotify_user_id: Mapped[Optional[str]] = mapped_column(String(100))
     display_name: Mapped[Optional[str]] = mapped_column(String(200))
+    email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     access_token: Mapped[Optional[str]] = mapped_column(Text)
     refresh_token: Mapped[Optional[str]] = mapped_column(Text)
     token_expires_at: Mapped[Optional[datetime]] = mapped_column(
