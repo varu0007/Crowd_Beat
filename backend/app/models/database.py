@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     JSON,
     Index,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import (
@@ -248,6 +249,26 @@ async def init_db():
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _ensure_schema_compatibility(conn)
+
+
+async def _ensure_schema_compatibility(conn):
+    """Apply tiny schema repairs for local databases created before model changes."""
+    dialect_name = conn.dialect.name
+    if dialect_name != "postgresql":
+        return
+
+    missing_guest_email = await conn.scalar(text("""
+        SELECT NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'guests'
+              AND column_name = 'email'
+        )
+    """))
+    if missing_guest_email:
+        await conn.execute(text("ALTER TABLE guests ADD COLUMN email VARCHAR(200)"))
 
 
 async def close_db():

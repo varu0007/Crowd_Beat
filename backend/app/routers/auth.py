@@ -147,6 +147,7 @@ async def callback(
 
     db.add(guest)
     await db.flush()  # ---
+    await db.commit()
 
     # ---
 

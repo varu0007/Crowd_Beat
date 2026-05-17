@@ -707,7 +707,9 @@ function CallbackHandler() {
         navigate('/', { replace: true });
       } else {
         // Guest flow: forward to backend
-        window.location.href = `${API_BASE}/auth/callback?code=${code}&state=${state}`;
+        const params = new URLSearchParams({ code });
+        if (state) params.set('state', state);
+        window.location.href = `${API_BASE}/auth/callback?${params.toString()}`;
       }
     } else {
       navigate('/', { replace: true });
