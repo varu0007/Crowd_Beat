@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # --- ML Engine ---
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.0-flash"
 
     # --- Recommendation tuning ---
     WEIGHT_DANCEABILITY: float = 0.25
