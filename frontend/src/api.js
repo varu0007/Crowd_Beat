@@ -39,13 +39,40 @@ export const api = {
     `${API_BASE}/auth/dj/login?session_id=${sessionId}`,
 
   // Guest Spotify OAuth that also captures username + email via OAuth state
-  guestLoginWithProfileUrl: (sessionId, profile) => {
+  guestLoginWithProfileUrl: (sessionId, profile, guestId) => {
     const params = new URLSearchParams();
     params.set('session_id', sessionId);
     if (profile?.username) params.set('username', profile.username);
     if (profile?.email) params.set('email', profile.email);
+    if (guestId) params.set('guest_id', guestId);
     return `${API_BASE}/auth/login_with_profile?${params.toString()}`;
   },
+
+  requestGuestApproval: (sessionId, profile) =>
+    fetch(`${API_BASE}/auth/approval-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        username: profile.username,
+        email: profile.email,
+      })
+    }).then(async r => {
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || r.statusText);
+      }
+      return r.json();
+    }),
+
+  getGuestApprovalStatus: (guestId) =>
+    fetch(`${API_BASE}/auth/approval-status/${guestId}`).then(async r => {
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || r.statusText);
+      }
+      return r.json();
+    }),
 
 
   createPlaylist: (sessionId, playlistName) =>
@@ -128,6 +155,7 @@ export const api = {
     getSessions: () => fetch(`${API_BASE}/admin/sessions`).then(r => r.json()),
     getGuests: (sid) => fetch(`${API_BASE}/admin/guests${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
     getGuestInfo: (sid) => fetch(`${API_BASE}/admin/guest_info${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
+    approveGuest: (id) => fetch(`${API_BASE}/admin/guests/${id}/approve`, { method: 'POST' }).then(r => r.json()),
     getTracks: (gid, sid) => {
       const params = new URLSearchParams();
       if (gid) params.append('guest_id', gid);

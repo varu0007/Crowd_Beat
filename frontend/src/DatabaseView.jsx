@@ -93,6 +93,15 @@ export default function DatabaseView() {
     }
   };
 
+  const handleApproveGuest = async (id) => {
+    try {
+      await adminApi.approveGuest(id);
+      loadData();
+    } catch (e) {
+      alert(`Approval failed: ${e.message || e}`);
+    }
+  };
+
   const handleDeleteTrack = async (id) => {
     if (window.confirm(t.dbConfirmDeleteTrack)) {
       try {
@@ -323,6 +332,9 @@ export default function DatabaseView() {
                   <tr>
                     <th>{t.colGuestId}</th>
                     <th>{t.colSessionId}</th>
+                    <th>Email</th>
+                    <th>Username</th>
+                    <th>Status</th>
                     <th>{t.colDisplayName}</th>
                     <th>{t.colSpotifyUserId}</th>
                     <th>{t.colJoinedAt}</th>
@@ -334,10 +346,20 @@ export default function DatabaseView() {
                     <tr key={item.id}>
                       <td title={item.id} style={{ fontWeight: 'bold' }}>{truncate(item.id)}</td>
                       <td title={item.session_id}>{truncate(item.session_id)}</td>
+                      <td>{item.email || '-'}</td>
+                      <td>{item.spotify_username || '-'}</td>
+                      <td>
+                        <span className="badge" style={{ backgroundColor: item.approval_status === 'pending' ? '#FFF4B8' : '#d4f8d4' }}>
+                          {item.approval_status || '-'}
+                        </span>
+                      </td>
                       <td>{item.display_name}</td>
                       <td>{item.spotify_user_id || '-'}</td>
                       <td>{formatDate(item.joined_at)}</td>
                       <td className="actions-cell">
+                        {item.approval_status === 'pending' && (
+                          <button className="nb-btn nb-btn--small nb-btn--primary" onClick={() => handleApproveGuest(item.id)} style={{ marginRight: '8px' }}>Approve</button>
+                        )}
                         <button className="nb-btn nb-btn--small nb-btn--ghost" onClick={() => navigateToTracks(item.id)} style={{ marginRight: '8px' }}>{t.btnViewTracks}</button>
 
                         <button

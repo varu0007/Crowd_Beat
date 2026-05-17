@@ -113,11 +113,36 @@ async def list_guests(
             "id": str(g.id),
             "session_id": str(g.session_id),
             "spotify_user_id": g.spotify_user_id,
+            "spotify_username": g.spotify_username,
             "display_name": g.display_name,
+            "email": g.email,
+            "approval_status": g.approval_status,
             "joined_at": g.joined_at.isoformat() if g.joined_at else None,
         }
         for g in guests
     ]
+
+
+@router.post("/guests/{guest_id}/approve")
+async def approve_guest(guest_id: str, db: AsyncSession = Depends(get_db)):
+    """Mark a pending guest as approved for Spotify OAuth."""
+    try:
+        gid = uuid.UUID(guest_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid guest_id")
+
+    result = await db.execute(select(Guest).where(Guest.id == gid))
+    guest = result.scalar_one_or_none()
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    guest.approval_status = "approved"
+    await db.flush()
+    return {
+        "ok": True,
+        "guest_id": str(guest.id),
+        "approval_status": guest.approval_status,
+    }
 
 
 @router.delete("/guests/{guest_id}")

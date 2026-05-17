@@ -108,8 +108,10 @@ class Guest(Base):
         UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
     )
     spotify_user_id: Mapped[Optional[str]] = mapped_column(String(100))
+    spotify_username: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(200))
     email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    approval_status: Mapped[str] = mapped_column(String(20), default="approved")
     access_token: Mapped[Optional[str]] = mapped_column(Text)
 
     refresh_token: Mapped[Optional[str]] = mapped_column(Text)
@@ -269,6 +271,33 @@ async def _ensure_schema_compatibility(conn):
     """))
     if missing_guest_email:
         await conn.execute(text("ALTER TABLE guests ADD COLUMN email VARCHAR(200)"))
+
+    missing_spotify_username = await conn.scalar(text("""
+        SELECT NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'guests'
+              AND column_name = 'spotify_username'
+        )
+    """))
+    if missing_spotify_username:
+        await conn.execute(text("ALTER TABLE guests ADD COLUMN spotify_username VARCHAR(200)"))
+
+    missing_approval_status = await conn.scalar(text("""
+        SELECT NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'guests'
+              AND column_name = 'approval_status'
+        )
+    """))
+    if missing_approval_status:
+        await conn.execute(text("""
+            ALTER TABLE guests
+            ADD COLUMN approval_status VARCHAR(20) NOT NULL DEFAULT 'approved'
+        """))
 
 
 async def close_db():
