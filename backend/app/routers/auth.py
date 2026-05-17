@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 from app.config import get_settings
 from app.models.database import get_db, Guest, GuestTrack, Session as DBSession
 from app.services import spotify_service, crowd_engine
