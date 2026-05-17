@@ -1,15 +1,13 @@
-"""
-config.py — 应用配置
-使用 pydantic-settings 从 .env 文件加载环境变量
-"""
+"""Application settings loaded from environment variables."""
 
-from pydantic_settings import BaseSettings
 from functools import lru_cache
 import os
 
+from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
-    """CrowdBeat 全局配置"""
+    """CrowdBeat global settings."""
 
     # --- Spotify OAuth ---
     SPOTIFY_CLIENT_ID: str
@@ -26,18 +24,17 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change_me_to_a_random_string"
 
     # --- ML Engine ---
-    # 推荐算法特征权重
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.0-flash"
+
+    # --- Recommendation tuning ---
     WEIGHT_DANCEABILITY: float = 0.25
     WEIGHT_ENERGY: float = 0.25
     WEIGHT_VALENCE: float = 0.20
     WEIGHT_TEMPO: float = 0.15
     WEIGHT_ACOUSTICNESS: float = 0.10
     WEIGHT_INSTRUMENTALNESS: float = 0.05
-
-    # Cold start 阈值
     COLD_START_THRESHOLD: int = 5
-
-    # 推荐返回数量
     RECOMMENDATION_LIMIT: int = 20
 
     model_config = {
@@ -49,5 +46,5 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """缓存的 Settings 实例，全局单例"""
+    """Return cached settings."""
     return Settings()

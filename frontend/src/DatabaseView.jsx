@@ -5,17 +5,17 @@ import { useI18n } from './i18n';
 
 // === Format helpers ===
 function truncate(str) {
-  if (!str) return '—';
+  if (!str) return '-';
   return str.length > 8 ? str.substring(0, 8) + '...' : str;
 }
 
 function formatDate(isoStr) {
-  if (!isoStr) return '—';
+  if (!isoStr) return '-';
   return new Date(isoStr).toLocaleString();
 }
 
 function pct(v) {
-  return v != null ? `${Math.round(v * 100)}` : '—';
+  return v != null ? `${Math.round(v * 100)}` : '-';
 }
 
 export default function DatabaseView() {
@@ -26,7 +26,7 @@ export default function DatabaseView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [qrSession, setQrSession] = useState(null);
-  
+
   const [allSessions, setAllSessions] = useState([]);
 
   // Filters
@@ -90,6 +90,15 @@ export default function DatabaseView() {
     }
   };
 
+  const handleApproveGuest = async (id) => {
+    try {
+      await adminApi.approveGuest(id);
+      loadData();
+    } catch (e) {
+      alert(`Approval failed: ${e.message || e}`);
+    }
+  };
+
   const handleDeleteTrack = async (id) => {
     if (window.confirm(t.dbConfirmDeleteTrack)) {
       try {
@@ -142,7 +151,7 @@ export default function DatabaseView() {
             <div style={{ fontWeight: 900, fontSize: '1.2rem', marginBottom: 8 }}>{qrSession.name}</div>
             <div style={{ fontSize: '0.8rem', color: '#888', marginBottom: 16 }}>{qrSession.status}</div>
             <img
-              src={`http://${window.location.hostname}:8000/host/session/${qrSession.id}/qr`}
+              src={`${API_BASE}/host/session/${qrSession.id}/qr`}
               alt="QR Code"
               style={{ width: 220, height: 220, border: '3px solid #000', display: 'block', margin: '0 auto 16px' }}
             />
@@ -150,7 +159,7 @@ export default function DatabaseView() {
               <div style={{ flex: 1, fontSize: '0.75rem', color: '#555', wordBreak: 'break-all', textAlign: 'left', border: '1px solid #eee', padding: 4 }}>
                 {window.location.origin}/join/{qrSession.id}
               </div>
-              <button 
+              <button
                 onClick={() => {
                   navigator.clipboard.writeText(`${window.location.origin}/join/${qrSession.id}`);
                   alert('Copied!');
@@ -161,7 +170,7 @@ export default function DatabaseView() {
                 Copy
               </button>
             </div>
-            <button className="nb-btn nb-btn--ghost" onClick={() => setQrSession(null)} style={{ width: '100%' }}>닫기</button>
+            <button className="nb-btn nb-btn--ghost" onClick={() => setQrSession(null)} style={{ width: '100%' }}>Close</button>
           </div>
         </div>
       )}
@@ -180,22 +189,22 @@ export default function DatabaseView() {
           {t.dbRefresh}
         </button>
       </div>
-      
+
       {/* Global Filter Control Panel */}
       {activeTab !== 'sessions' && (
-        <div style={{ 
-          padding: '16px 20px', border: '4px solid #000', backgroundColor: '#E0F7FA', 
-          marginBottom: '24px', display: 'flex', gap: 16, alignItems: 'center', 
+        <div style={{
+          padding: '16px 20px', border: '4px solid #000', backgroundColor: '#E0F7FA',
+          marginBottom: '24px', display: 'flex', gap: 16, alignItems: 'center',
           boxShadow: '6px 6px 0 #000', flexWrap: 'wrap'
         }}>
           <span style={{ fontWeight: 900, fontSize: '1.1rem' }}>{t.dbFiltersLabel}</span>
-          
+
           {/* Custom Neubrutalism Dropdown */}
           <div style={{ position: 'relative', flex: '1 1 300px' }}>
-            <div 
+            <div
               className="nb-input"
-              style={{ 
-                padding: '8px 12px', cursor: 'pointer', margin: 0, 
+              style={{
+                padding: '8px 12px', cursor: 'pointer', margin: 0,
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 backgroundColor: '#fff', userSelect: 'none'
               }}
@@ -206,7 +215,7 @@ export default function DatabaseView() {
               </span>
               <span style={{ fontSize: '0.8rem' }}>{dropdownOpen ? '▲' : '▼'}</span>
             </div>
-            
+
             {dropdownOpen && (
               <>
                 {/* Backdrop to close dropdown on outside click */}
@@ -216,7 +225,7 @@ export default function DatabaseView() {
                   backgroundColor: '#fff', border: '4px solid #000', boxShadow: '6px 6px 0 #000',
                   zIndex: 100, maxHeight: '300px', overflowY: 'auto'
                 }}>
-                  <div 
+                  <div
                     style={{ padding: '12px', borderBottom: '3px solid #000', cursor: 'pointer', fontWeight: 900, backgroundColor: !sessionFilter ? '#d4f8d4' : 'transparent' }}
                     onClick={() => { setSessionFilter(''); setDropdownOpen(false); }}
                     onMouseEnter={e => e.currentTarget.style.backgroundColor = !sessionFilter ? '#d4f8d4' : '#f0f0f0'}
@@ -225,9 +234,9 @@ export default function DatabaseView() {
                     {t.dbAllSessions}
                   </div>
                   {allSessions.map(s => (
-                    <div 
+                    <div
                       key={s.id}
-                      style={{ 
+                      style={{
                         padding: '12px', borderBottom: '3px solid #000', cursor: 'pointer', fontWeight: 900,
                         backgroundColor: sessionFilter === s.id ? '#d4f8d4' : 'transparent'
                       }}
@@ -246,7 +255,7 @@ export default function DatabaseView() {
           {activeTab === 'tracks' && guestFilter && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, backgroundColor: '#fff', padding: '6px 12px', border: '3px solid #000' }}>
               <span style={{ fontWeight: 700 }}>Guest ID: {truncate(guestFilter)}</span>
-              <button className="nb-btn nb-btn--small nb-btn--danger" style={{ padding: '2px 8px', minWidth: 0, fontSize: '0.8rem' }} onClick={() => setGuestFilter('')}>✕</button>
+              <button className="nb-btn nb-btn--small nb-btn--danger" style={{ padding: '2px 8px', minWidth: 0, fontSize: '0.8rem' }} onClick={() => setGuestFilter('')}>X</button>
             </div>
           )}
 
@@ -295,7 +304,7 @@ export default function DatabaseView() {
                           {item.status}
                         </span>
                       </td>
-                      <td>{(item.genre_seeds || []).join(', ') || '—'}</td>
+                      <td>{(item.genre_seeds || []).join(', ') || '-'}</td>
                       <td>{formatDate(item.created_at)}</td>
                       <td style={{ fontWeight: 'bold', color: '#00A859' }}>{item.guest_count}</td>
                       <td className="actions-cell">
@@ -320,6 +329,9 @@ export default function DatabaseView() {
                   <tr>
                     <th>{t.colGuestId}</th>
                     <th>{t.colSessionId}</th>
+                    <th>Email</th>
+                    <th>Username</th>
+                    <th>Status</th>
                     <th>{t.colDisplayName}</th>
                     <th>{t.colSpotifyUserId}</th>
                     <th>{t.colJoinedAt}</th>
@@ -331,11 +343,22 @@ export default function DatabaseView() {
                     <tr key={item.id}>
                       <td title={item.id} style={{ fontWeight: 'bold' }}>{truncate(item.id)}</td>
                       <td title={item.session_id}>{truncate(item.session_id)}</td>
+                      <td>{item.email || '-'}</td>
+                      <td>{item.spotify_username || '-'}</td>
+                      <td>
+                        <span className="badge" style={{ backgroundColor: item.approval_status === 'pending' ? '#FFF4B8' : '#d4f8d4' }}>
+                          {item.approval_status || '-'}
+                        </span>
+                      </td>
                       <td>{item.display_name}</td>
-                      <td>{item.spotify_user_id || '—'}</td>
+                      <td>{item.spotify_user_id || '-'}</td>
                       <td>{formatDate(item.joined_at)}</td>
                       <td className="actions-cell">
+                        {item.approval_status === 'pending' && (
+                          <button className="nb-btn nb-btn--small nb-btn--primary" onClick={() => handleApproveGuest(item.id)} style={{ marginRight: '8px' }}>Approve</button>
+                        )}
                         <button className="nb-btn nb-btn--small nb-btn--ghost" onClick={() => navigateToTracks(item.id)} style={{ marginRight: '8px' }}>{t.btnViewTracks}</button>
+
                         <button className="nb-btn nb-btn--small nb-btn--danger" onClick={() => handleDeleteGuest(item.id)}>{t.btnDelete}</button>
                       </td>
                     </tr>
@@ -367,7 +390,7 @@ export default function DatabaseView() {
                       <td title={item.guest_id}>{truncate(item.guest_id)}</td>
                       <td style={{ fontWeight: 'bold' }}>{item.track_name}</td>
                       <td>{item.artist_name}</td>
-                      <td>{item.popularity ?? '—'}</td>
+                      <td>{item.popularity ?? '-'}</td>
                       <td>{pct(item.danceability)}</td>
                       <td>{pct(item.energy)}</td>
                       <td>{pct(item.valence)}</td>
@@ -403,7 +426,7 @@ export default function DatabaseView() {
                       <td style={{ fontWeight: 'bold' }}>{item.track_name}</td>
                       <td>{item.artist_name}</td>
                       <td style={{ fontWeight: 'bold' }}>{pct(item.score)}</td>
-                      <td>{item.is_cold_start ? t.yesColdStart : '—'}</td>
+                      <td>{item.is_cold_start ? t.yesColdStart : '-'}</td>
                       <td>{formatDate(item.generated_at)}</td>
                       <td>{item.guest_count}</td>
                     </tr>

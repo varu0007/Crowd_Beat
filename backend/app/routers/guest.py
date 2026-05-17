@@ -1,15 +1,13 @@
-"""
-guest.py — 观众相关端点
-"""
+"""CrowdBeat module."""
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.database import get_db, Guest, GuestTrack, Session as DBSession
+from app.models.database import get_db, Guest, GuestTrack
 from app.services import spotify_service, crowd_engine
 
 router = APIRouter(prefix="/guest", tags=["guest"])
@@ -19,43 +17,13 @@ class PlaylistSelection(BaseModel):
     playlist_ids: List[str]
 
 
-class ManualGuestRequest(BaseModel):
-    session_id: str
-    display_name: str
-    email: str
-
-
-@router.post("/manual")
-async def join_manual(payload: ManualGuestRequest, db: AsyncSession = Depends(get_db)):
-    """Join as guest without Spotify - name + email only"""
-    try:
-        sid = uuid.UUID(payload.session_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid session_id")
-
-    result = await db.execute(
-        select(DBSession).where(DBSession.id == sid, DBSession.status == "active")
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Session not found or closed")
-
-    guest = Guest(
-        session_id=sid,
-        display_name=payload.display_name,
-        email=payload.email,
-    )
-    db.add(guest)
-    await db.flush()
-
-    return {"guest_id": str(guest.id), "display_name": guest.display_name}
-
-
 class TrackSelection(BaseModel):
     tracks: List[dict]  # [{spotify_track_id, track_name, artist_name, playlist_name?}]
 
 
 @router.get("/{guest_id}/playlists")
 async def get_playlists(guest_id: str, db: AsyncSession = Depends(get_db)):
+
     try:
         gid = uuid.UUID(guest_id)
     except ValueError:
@@ -88,6 +56,7 @@ async def get_playlists(guest_id: str, db: AsyncSession = Depends(get_db)):
 async def submit_playlists(
     guest_id: str,
     payload: PlaylistSelection,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     try:
@@ -153,16 +122,18 @@ async def submit_playlists(
         db.add(guest_track)
 
     await db.flush()
+    await db.commit()
 
-    # 5. Trigger recommendation engine
-    await crowd_engine.on_guest_join(guest.session_id, guest.id, db)
+    # 5. Notify immediately, then generate recommendations after responding.
+    await crowd_engine.notify_guest_tracks_shared(guest.session_id, guest.id)
+    background_tasks.add_task(crowd_engine.recompute_and_broadcast, guest.session_id, guest.id)
 
     return {"ok": True, "tracks_analyzed": len(deduped_tracks)}
 
 
 @router.get("/{guest_id}/playlists/{playlist_id}/tracks")
 async def get_playlist_tracks(guest_id: str, playlist_id: str, db: AsyncSession = Depends(get_db)):
-    """获取指定歌单内的歌曲列表"""
+    """Internal helper."""
     try:
         gid = uuid.UUID(guest_id)
     except ValueError:
@@ -184,21 +155,49 @@ async def get_playlist_tracks(guest_id: str, playlist_id: str, db: AsyncSession 
     except Exception as e:
         error_str = str(e)
         if "403" in error_str or "Forbidden" in error_str:
-            # 权限不足（如别人的歌单、受限歌单），返回空列表而不是报错
+            # ---
             print(f"[guest] 403 for playlist {playlist_id}: {e}")
-            return {"playlist_id": playlist_id, "tracks": [], "error": "此歌单无法访问（权限不足）"}
+            return {"playlist_id": playlist_id, "tracks": [], "error": "This playlist cannot be accessed with the current Spotify permissions."}
         raise HTTPException(status_code=500, detail=f"Failed to fetch tracks: {e}")
 
     return {"playlist_id": playlist_id, "tracks": tracks}
 
 
+@router.get("/{guest_id}/profile-csv")
+async def get_profile_csv_rows(guest_id: str, db: AsyncSession = Depends(get_db)):
+    """Return CSV rows (as JSON) for the guest profile (username/email).
+
+    Frontend will convert to CSV and download.
+    """
+    try:
+        gid = uuid.UUID(guest_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid guest_id")
+
+    result = await db.execute(select(Guest).where(Guest.id == gid))
+    guest = result.scalar_one_or_none()
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    display_name = guest.display_name or ""
+    email = getattr(guest, "email", "") or ""
+
+
+    return [{
+        "username": display_name,
+        "email": email,
+    }]
+
+
 @router.post("/{guest_id}/tracks")
 async def submit_tracks(
+
     guest_id: str,
     payload: TrackSelection,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    """提交用户选择的具体歌曲进行分析"""
+    """Internal helper."""
     try:
         gid = uuid.UUID(guest_id)
     except ValueError:
@@ -250,8 +249,10 @@ async def submit_tracks(
         db.add(guest_track)
 
     await db.flush()
+    await db.commit()
 
-    # 4. Trigger recommendation engine
-    await crowd_engine.on_guest_join(guest.session_id, guest.id, db)
+    # 4. Notify immediately, then generate recommendations after responding.
+    await crowd_engine.notify_guest_tracks_shared(guest.session_id, guest.id)
+    background_tasks.add_task(crowd_engine.recompute_and_broadcast, guest.session_id, guest.id)
 
     return {"ok": True, "tracks_analyzed": len(deduped_tracks)}

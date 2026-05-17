@@ -1,14 +1,4 @@
-"""
-admin.py — 管理端点：查看 / 删除 PostgreSQL 四张表的数据
-端点：
-  GET    /admin/sessions               → 场次列表 (含 guest_count)
-  GET    /admin/guests                 → 观众列表 (?session_id=xxx 过滤)
-  GET    /admin/tracks                 → 歌曲列表 (?guest_id=xxx 过滤)
-  GET    /admin/recommendations        → 推荐列表 (?session_id=xxx 过滤)
-  DELETE /admin/sessions/{id}          → 级联删除场次
-  DELETE /admin/guests/{id}            → 级联删除观众
-  DELETE /admin/tracks/{id}            → 删除单条歌曲
-"""
+"""CrowdBeat module."""
 
 import uuid
 from typing import Optional
@@ -24,15 +14,16 @@ from app.models.database import (
     GuestTrack,
     Recommendation,
 )
+from app.services import ml_engine
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-# ── Sessions ──
+# ---
 
 @router.get("/sessions")
 async def list_sessions(db: AsyncSession = Depends(get_db)):
-    """查询所有场次，附带每个场次的 guest 数量"""
+    """Internal helper."""
     result = await db.execute(
         select(DBSession).order_by(DBSession.created_at.desc()).limit(50)
     )
@@ -40,7 +31,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
 
     items = []
     for s in sessions:
-        # 查询该 session 的 guest 数量
+        # ---
         gc_result = await db.execute(
             select(func.count()).where(Guest.session_id == s.id)
         )
@@ -61,35 +52,35 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
-    """级联删除场次及其所有关联数据"""
+    """Internal helper."""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
-    # 查出该 session 下所有 guest ids
+    # ---
     guest_result = await db.execute(
         select(Guest.id).where(Guest.session_id == sid)
     )
     guest_ids = [row[0] for row in guest_result.all()]
 
-    # 1. 删 recommendations
+    # ---
     await db.execute(
         delete(Recommendation).where(Recommendation.session_id == sid)
     )
 
-    # 2. 删 guest_tracks
+    # ---
     if guest_ids:
         await db.execute(
             delete(GuestTrack).where(GuestTrack.guest_id.in_(guest_ids))
         )
 
-    # 3. 删 guests
+    # ---
     await db.execute(
         delete(Guest).where(Guest.session_id == sid)
     )
 
-    # 4. 删 session
+    # ---
     await db.execute(
         delete(DBSession).where(DBSession.id == sid)
     )
@@ -97,14 +88,14 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-# ── Guests ──
+# ---
 
 @router.get("/guests")
 async def list_guests(
     session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询观众列表，支持按 session_id 过滤"""
+    """Internal helper."""
     stmt = select(Guest).order_by(Guest.joined_at.desc()).limit(100)
 
     if session_id:
@@ -122,27 +113,52 @@ async def list_guests(
             "id": str(g.id),
             "session_id": str(g.session_id),
             "spotify_user_id": g.spotify_user_id,
+            "spotify_username": g.spotify_username,
             "display_name": g.display_name,
+            "email": g.email,
+            "approval_status": g.approval_status,
             "joined_at": g.joined_at.isoformat() if g.joined_at else None,
         }
         for g in guests
     ]
 
 
-@router.delete("/guests/{guest_id}")
-async def delete_guest(guest_id: str, db: AsyncSession = Depends(get_db)):
-    """级联删除观众及其歌曲数据"""
+@router.post("/guests/{guest_id}/approve")
+async def approve_guest(guest_id: str, db: AsyncSession = Depends(get_db)):
+    """Mark a pending guest as approved for Spotify OAuth."""
     try:
         gid = uuid.UUID(guest_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid guest_id")
 
-    # 1. 删 guest_tracks
+    result = await db.execute(select(Guest).where(Guest.id == gid))
+    guest = result.scalar_one_or_none()
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    guest.approval_status = "approved"
+    await db.flush()
+    return {
+        "ok": True,
+        "guest_id": str(guest.id),
+        "approval_status": guest.approval_status,
+    }
+
+
+@router.delete("/guests/{guest_id}")
+async def delete_guest(guest_id: str, db: AsyncSession = Depends(get_db)):
+    """Internal helper."""
+    try:
+        gid = uuid.UUID(guest_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid guest_id")
+
+    # ---
     await db.execute(
         delete(GuestTrack).where(GuestTrack.guest_id == gid)
     )
 
-    # 2. 删 guest
+    # ---
     await db.execute(
         delete(Guest).where(Guest.id == gid)
     )
@@ -150,7 +166,7 @@ async def delete_guest(guest_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-# ── Tracks ──
+# ---
 
 @router.get("/tracks")
 async def list_tracks(
@@ -158,7 +174,7 @@ async def list_tracks(
     session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询歌曲列表，支持按 guest_id 或 session_id 过滤"""
+    """Internal helper."""
     stmt = select(GuestTrack)
 
     if session_id:
@@ -174,7 +190,7 @@ async def list_tracks(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid guest_id")
         stmt = stmt.where(GuestTrack.guest_id == gid)
-        
+
     stmt = stmt.order_by(GuestTrack.id.desc()).limit(200)
 
     result = await db.execute(stmt)
@@ -201,32 +217,66 @@ async def list_tracks(
 
 @router.delete("/tracks/{track_id}")
 async def delete_track(track_id: int, db: AsyncSession = Depends(get_db)):
-    """删除单条歌曲记录"""
+    """Internal helper."""
     await db.execute(
         delete(GuestTrack).where(GuestTrack.id == track_id)
     )
     return {"ok": True}
 
 
-# ── Recommendations ──
+# ---
 
 @router.get("/recommendations")
 async def list_recommendations(
     session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询推荐列表，支持按 session_id 过滤"""
-    stmt = select(Recommendation).order_by(Recommendation.rank.asc()).limit(100)
-
+    """Internal helper."""
     if session_id:
         try:
             sid = uuid.UUID(session_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid session_id")
-        stmt = stmt.where(Recommendation.session_id == sid)
+        stmt = (
+            select(Recommendation)
+            .where(Recommendation.session_id == sid)
+            .order_by(Recommendation.rank.asc())
+            .limit(100)
+        )
 
-    result = await db.execute(stmt)
-    recs = result.scalars().all()
+        result = await db.execute(stmt)
+        recs = result.scalars().all()
+        if not recs:
+            session_result = await db.execute(
+                select(DBSession).where(DBSession.id == sid, DBSession.status == "active")
+            )
+            if session_result.scalar_one_or_none():
+                try:
+                    await ml_engine.recompute(sid, db)
+                except Exception as exc:
+                    print(f"[admin] recommendation recompute failed for {sid}: {exc}")
+                result = await db.execute(stmt)
+                recs = result.scalars().all()
+    else:
+        stmt = select(Recommendation).order_by(
+            Recommendation.generated_at.desc(),
+            Recommendation.rank.asc(),
+        ).limit(100)
+
+        result = await db.execute(stmt)
+        recs = result.scalars().all()
+        if not recs:
+            active_sessions_result = await db.execute(
+                select(DBSession.id).where(DBSession.status == "active").order_by(DBSession.created_at.desc()).limit(5)
+            )
+            active_session_ids = active_sessions_result.scalars().all()
+            for sid in active_session_ids:
+                try:
+                    await ml_engine.recompute(sid, db)
+                except Exception as exc:
+                    print(f"[admin] recommendation recompute failed for {sid}: {exc}")
+            result = await db.execute(stmt)
+            recs = result.scalars().all()
 
     return [
         {
@@ -244,14 +294,14 @@ async def list_recommendations(
         for r in recs
     ]
 
-# ── Playlist Tracks ──
+# ---
 
 @router.get("/playlist_tracks")
 async def list_playlist_tracks(
     session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询虚拟待播歌单列表，支持按 session_id 过滤"""
+    """Internal helper."""
     from app.models.database import PlaylistTrack
     stmt = select(PlaylistTrack).order_by(PlaylistTrack.added_at.desc()).limit(100)
 
@@ -275,4 +325,36 @@ async def list_playlist_tracks(
             "added_at": t.added_at.isoformat() if t.added_at else None,
         }
         for t in tracks
+    ]
+
+# ---
+
+@router.get("/guest_info")
+async def list_guest_info(
+    session_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Internal helper to retrieve manual guest inputs."""
+    from app.models.database import GuestInfo
+    stmt = select(GuestInfo).order_by(GuestInfo.created_at.desc()).limit(200)
+
+    if session_id:
+        try:
+            sid = uuid.UUID(session_id)
+            stmt = stmt.where(GuestInfo.session_id == sid)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session_id")
+
+    result = await db.execute(stmt)
+    records = result.scalars().all()
+
+    return [
+        {
+            "id": r.id,
+            "session_id": str(r.session_id) if r.session_id else None,
+            "username": r.username,
+            "email": r.email,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in records
     ]

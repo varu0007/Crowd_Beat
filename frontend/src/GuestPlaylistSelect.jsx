@@ -33,7 +33,7 @@ export default function GuestPlaylistSelect() {
         setDisplayName(data.display_name);
         setLoading(false);
 
-        // 预加载所有歌单的歌曲
+        // é¢„åŠ è½½æ‰€æœ‰æ­Œå•çš„æ­Œæ›²
         for (const pl of data.playlists) {
           try {
             const trackData = await api.getPlaylistTracks(guestId, pl.id);
@@ -135,7 +135,7 @@ export default function GuestPlaylistSelect() {
       <div className="page-container" style={{ padding: '20px', minHeight: 'auto' }}>
         <div style={{ marginBottom: '24px' }}>
           <h1 style={{ fontSize: '1.8rem', fontWeight: 900, marginBottom: '8px', lineHeight: 1.2 }}>
-            {t.hi}，<span style={{ color: '#00A859' }}>{displayName}</span>！<br/>{t.selectMusicForParty}
+            {t.hi}, <span style={{ color: '#00A859' }}>{displayName}</span>!<br/>{t.selectMusicForParty}
           </h1>
           <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#666' }}>
             {t.selectPlaylistDesc}
@@ -198,7 +198,7 @@ export default function GuestPlaylistSelect() {
                       {tracks.length > 0 ? tracks.length : pl.track_count} {t.songs}
                       {selectedInPlaylist > 0 && (
                         <span style={{ color: '#00A859', marginLeft: 8 }}>
-                          · {t.selectedInPlaylist(selectedInPlaylist)}
+                          - {t.selectedInPlaylist(selectedInPlaylist)}
                         </span>
                       )}
                     </div>

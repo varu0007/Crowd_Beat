@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCrowdBeatWS } from './hooks/useCrowdBeatWS';
 import { api } from './api';
@@ -25,12 +25,10 @@ export default function DJWorkstation() {
 
   const addRecommendationBatch = useCallback((batch, { force = false } = {}) => {
     if (!batch || batch.length === 0) return;
-
     setRecHistory(prev => {
       if (!force && prev.length > 0 && batchKey(prev[prev.length - 1]) === batchKey(batch)) {
         return prev;
       }
-
       const newHistory = [...prev, batch];
       setHistoryIdx(newHistory.length - 1);
       return newHistory;
@@ -52,6 +50,7 @@ export default function DJWorkstation() {
     }).catch(() => {});
   }, [sessionId]);
 
+
   const handleAddTrack = async (track) => {
     const trackId = track.spotify_track_id;
     if (!trackId) return;
@@ -59,7 +58,7 @@ export default function DJWorkstation() {
       await api.addTrackToPlaylist(sessionId, trackId, track.track_name, track.artist_name);
       setAddedTracks(prev => new Set([...prev, trackId]));
       setPlaylistTracks(prev => [...prev, track]);
-    } catch (e) { setError(`添加失败: ${e.message}`); }
+    } catch (e) { setError(`Add failed: ${e.message}`); }
   };
 
   const handleRefresh = async () => {
@@ -67,7 +66,7 @@ export default function DJWorkstation() {
       const data = await api.refreshRecommendations(sessionId);
       addRecommendationBatch(data.recommendations || [], { force: true });
     }
-    catch (e) { alert(`刷新失败: ${e.message}`); }
+    catch (e) { alert(`Refresh failed: ${e.message}`); }
   };
 
   // Track add button
@@ -108,14 +107,14 @@ export default function DJWorkstation() {
       {error && (
         <div style={{ backgroundColor: '#FF4C4C', color: '#fff', border: '3px solid #000', padding: 12, fontWeight: 700, marginBottom: 20, boxShadow: '4px 4px 0 #000' }}>
           {error}
-          <button onClick={() => setError(null)} style={{ float: 'right', background: 'none', border: 'none', color: '#fff', fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
+          <button onClick={() => setError(null)} style={{ float: 'right', background: 'none', border: 'none', color: '#fff', fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit' }}>X</button>
         </div>
       )}
 
-      {/* === 阶段一与二：左右分栏 === */}
+      {/* === Phase 1 and 2: Split columns === */}
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
 
-        {/* === 阶段一：选歌 === */}
+        {/* === Phase 1: Select Tracks === */}
         <div className="nb-card" style={{ flex: '1 1 500px', padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '16px 24px', borderBottom: '4px solid #000', backgroundColor: '#1a1a1a', color: '#FFE600', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -125,17 +124,17 @@ export default function DJWorkstation() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: '0.85rem', fontWeight: 700 }}>
             {recHistory.length > 0 && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', borderRight: '2px solid #555', paddingRight: 16 }}>
-                <button 
-                  className="nb-btn nb-btn--small" 
-                  disabled={historyIdx === 0} 
+                <button
+                  className="nb-btn nb-btn--small"
+                  disabled={historyIdx === 0}
                   onClick={() => setHistoryIdx(i => i - 1)}
                   style={{ padding: '4px 12px', opacity: historyIdx === 0 ? 0.5 : 1 }}
                 >
                   {t.prevRecs}
                 </button>
-                <button 
-                  className="nb-btn nb-btn--small" 
-                  disabled={historyIdx === recHistory.length - 1} 
+                <button
+                  className="nb-btn nb-btn--small"
+                  disabled={historyIdx === recHistory.length - 1}
                   onClick={() => setHistoryIdx(i => i + 1)}
                   style={{ padding: '4px 12px', opacity: historyIdx === recHistory.length - 1 ? 0.5 : 1 }}
                 >
@@ -195,7 +194,7 @@ export default function DJWorkstation() {
         </div>
       </div>
 
-      {/* === 阶段二：已选歌单 === */}
+      {/* === Phase 2: Selected Playlist === */}
           <div className="nb-card" style={{ flex: '1 1 300px', padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '16px 24px', borderBottom: '4px solid #000', backgroundColor: '#00A859', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -227,7 +226,7 @@ export default function DJWorkstation() {
 
       </div>
 
-      {/* 底部返回 */}
+      {/* Bottom Back Button */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 32, marginTop: 24 }}>
         <button
           onClick={() => navigate(`/party/${sessionId}`)}
@@ -235,15 +234,15 @@ export default function DJWorkstation() {
         >
           {t.backToLobby}
         </button>
-        
+
         <button
           onClick={async () => {
-            if (!window.confirm('确定要结束当前派对吗？')) return;
+            if (!window.confirm(t.confirmCloseSession || 'Are you sure you want to end this party?')) return;
             try {
               await api.closeSession(sessionId);
               navigate('/');
             } catch (e) {
-              alert(`关闭失败: ${e.message}`);
+              alert(t.closeFailed ? t.closeFailed(e.message) : `Close failed: ${e.message}`);
             }
           }}
           style={{
@@ -251,7 +250,7 @@ export default function DJWorkstation() {
             fontSize: '0.9rem', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit',
           }}
         >
-          结束派对
+          {t.endParty || 'End Party'}
         </button>
       </div>
     </div>

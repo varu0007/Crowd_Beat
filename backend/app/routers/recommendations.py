@@ -1,9 +1,4 @@
-"""
-recommendations.py — 推荐结果路由
-端点：
-  GET  /recommendations/{session_id}          → 获取当前推荐列表
-  POST /recommendations/{session_id}/refresh  → 手动刷新推荐
-"""
+"""CrowdBeat module."""
 
 import uuid
 
@@ -18,7 +13,7 @@ from app.services import ml_engine, crowd_engine
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
-# ── Response Schemas ──
+# ---
 
 class RecommendationItem(BaseModel):
     spotify_track_id: str
@@ -39,33 +34,65 @@ class RecommendationsResponse(BaseModel):
     recommendations: list[RecommendationItem]
 
 
-# ── Endpoints ──
+# ---
 
 @router.get("/{session_id}", response_model=RecommendationsResponse)
 async def get_recommendations(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """获取指定 session 的当前推荐列表"""
+    """Internal helper."""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
-    # 验证 session 存在
+    # ---
     session_result = await db.execute(
         select(DBSession).where(DBSession.id == sid)
     )
-    if not session_result.scalar_one_or_none():
+    db_session = session_result.scalar_one_or_none()
+    if not db_session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # 查询推荐
+    # ---
     result = await db.execute(
         select(Recommendation)
         .where(Recommendation.session_id == sid)
         .order_by(Recommendation.rank.asc())
     )
     recs = result.scalars().all()
+
+    if not recs and db_session.status == "active":
+        try:
+            generated = await ml_engine.recompute(sid, db)
+        except Exception as exc:
+            print(f"[recommendations] lazy recompute failed: {exc}")
+            generated = []
+
+        if generated:
+            items = [
+                RecommendationItem(
+                    spotify_track_id=r["spotify_track_id"],
+                    track_name=r["track_name"],
+                    artist_name=r["artist_name"],
+                    score=r["score"],
+                    rank=r["rank"],
+                    is_cold_start=r.get("is_cold_start", False),
+                )
+                for r in generated
+            ]
+            guest_count_result = await db.execute(text(
+                "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
+            ), {"session_id": sid})
+            real_guest_count = guest_count_result.scalar() or 0
+            return RecommendationsResponse(
+                session_id=session_id,
+                count=len(items),
+                guest_count=real_guest_count,
+                is_cold_start=items[0].is_cold_start if items else False,
+                recommendations=items,
+            )
 
     if not recs:
         return RecommendationsResponse(
@@ -88,7 +115,7 @@ async def get_recommendations(
         for r in recs
     ]
 
-    # 查询真实 guest 数量
+    # ---
     guest_count_result = await db.execute(text(
         "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
     ), {"session_id": sid})
@@ -108,13 +135,13 @@ async def refresh_recommendations(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """DJ 手动触发推荐刷新"""
+    """Internal helper."""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
-    # 验证 session 存在且活跃
+    # ---
     session_result = await db.execute(
         select(DBSession).where(
             DBSession.id == sid,
@@ -124,10 +151,13 @@ async def refresh_recommendations(
     if not session_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Session not found or closed")
 
-    # 重新计算推荐
-    recommendations = await ml_engine.recompute(sid, db)
+    # ---
+    try:
+        recommendations = await ml_engine.recompute(sid, db)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # WebSocket 广播
+    # ---
     await crowd_engine.broadcast(sid, {
         "type": "recommendations_update",
         "session_id": session_id,
@@ -148,7 +178,7 @@ async def refresh_recommendations(
         for r in recommendations
     ]
 
-    # 查询真实 guest 数量
+    # ---
     guest_count_result = await db.execute(text(
         "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
     ), {"session_id": sid})
