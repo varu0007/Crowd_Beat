@@ -1,13 +1,9 @@
-export const API_BASE = import.meta.env.VITE_API_URL || window.location.origin;
-export const WS_BASE = (import.meta.env.VITE_WS_URL || API_BASE)
-  .replace(/^http:\/\//i, 'ws://')
-  .replace(/^https:\/\//i, 'wss://')
-  .replace(/\/$/, '');
+const BASE = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`;
 
 export const api = {
-  // åœºæ¬¡
+  // 场次
   createSession: (name, genreSeeds) =>
-    fetch(`${API_BASE}/host/session`, {
+    fetch(`${BASE}/host/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, genre_seeds: genreSeeds })
@@ -20,63 +16,26 @@ export const api = {
     }),
 
   getSession: (sessionId) =>
-    fetch(`${API_BASE}/host/session/${sessionId}`).then(r => {
+    fetch(`${BASE}/host/session/${sessionId}`).then(r => {
       if (!r.ok) throw new Error(r.statusText)
       return r.json()
     }),
 
   closeSession: (sessionId) =>
-    fetch(`${API_BASE}/host/session/${sessionId}`, { method: 'DELETE' }).then(r => r.json()),
+    fetch(`${BASE}/host/session/${sessionId}`, { method: 'DELETE' }).then(r => r.json()),
 
   refreshRecommendations: (sessionId) =>
-    fetch(`${API_BASE}/recommendations/${sessionId}/refresh`, { method: 'POST' }).then(r => r.json()),
+    fetch(`${BASE}/recommendations/${sessionId}/refresh`, { method: 'POST' }).then(r => r.json()),
 
   getRecommendations: (sessionId) =>
-    fetch(`${API_BASE}/recommendations/${sessionId}`).then(r => r.json()),
+    fetch(`${BASE}/recommendations/${sessionId}`).then(r => r.json()),
 
   // DJ Spotify (server-side OAuth)
   djLogin: (sessionId) =>
-    `${API_BASE}/auth/dj/login?session_id=${sessionId}`,
-
-  // Guest Spotify OAuth that also captures username + email via OAuth state
-  guestLoginWithProfileUrl: (sessionId, profile, guestId) => {
-    const params = new URLSearchParams();
-    params.set('session_id', sessionId);
-    if (profile?.username) params.set('username', profile.username);
-    if (profile?.email) params.set('email', profile.email);
-    if (guestId) params.set('guest_id', guestId);
-    return `${API_BASE}/auth/login_with_profile?${params.toString()}`;
-  },
-
-  requestGuestApproval: (sessionId, profile) =>
-    fetch(`${API_BASE}/auth/approval-request`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessionId,
-        username: profile.username,
-        email: profile.email,
-      })
-    }).then(async r => {
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        throw new Error(err.detail || r.statusText);
-      }
-      return r.json();
-    }),
-
-  getGuestApprovalStatus: (guestId) =>
-    fetch(`${API_BASE}/auth/approval-status/${guestId}`).then(async r => {
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        throw new Error(err.detail || r.statusText);
-      }
-      return r.json();
-    }),
-
+    `${BASE}/auth/dj/login?session_id=${sessionId}`,
 
   createPlaylist: (sessionId, playlistName) =>
-    fetch(`${API_BASE}/host/session/${sessionId}/playlist/create`, {
+    fetch(`${BASE}/host/session/${sessionId}/playlist/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ playlist_name: playlistName })
@@ -91,7 +50,7 @@ export const api = {
     }),
 
   addTrackToPlaylist: (sessionId, trackId, trackName, artistName) =>
-    fetch(`${API_BASE}/host/session/${sessionId}/playlist/add-track`, {
+    fetch(`${BASE}/host/session/${sessionId}/playlist/add-track`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ track_id: trackId, track_name: trackName || "Unknown", artist_name: artistName || "Unknown" })
@@ -106,26 +65,33 @@ export const api = {
     }),
 
   getDjPlaylistTracks: (sessionId) =>
-    fetch(`${API_BASE}/host/session/${sessionId}/playlist/tracks`).then(r => r.json()),
+    fetch(`${BASE}/host/session/${sessionId}/playlist/tracks`).then(r => r.json()),
 
   // Guest
   guestLoginUrl: (sessionId) =>
-    `${API_BASE}/auth/login?session_id=${sessionId}`,
+    `${BASE}/auth/login?session_id=${sessionId}`,
 
-  // Guest profile CSV rows for download
-  getGuestProfileCsvRows: (guestId) =>
-    fetch(`${API_BASE}/guest/${guestId}/profile-csv`).then(r => r.json()),
-
-
+  joinManual: (sessionId, displayName, email) =>
+    fetch(`${BASE}/guest/manual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, display_name: displayName, email })
+    }).then(async r => {
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || r.statusText);
+      }
+      return r.json();
+    }),
 
   getGuestPlaylists: (guestId) =>
-    fetch(`${API_BASE}/guest/${guestId}/playlists`).then(r => {
+    fetch(`${BASE}/guest/${guestId}/playlists`).then(r => {
       if (!r.ok) throw new Error(r.statusText)
       return r.json()
     }),
 
   submitPlaylists: (guestId, playlistIds) =>
-    fetch(`${API_BASE}/guest/${guestId}/playlists`, {
+    fetch(`${BASE}/guest/${guestId}/playlists`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ playlist_ids: playlistIds })
@@ -135,13 +101,13 @@ export const api = {
     }),
 
   getPlaylistTracks: (guestId, playlistId) =>
-    fetch(`${API_BASE}/guest/${guestId}/playlists/${playlistId}/tracks`).then(r => {
+    fetch(`${BASE}/guest/${guestId}/playlists/${playlistId}/tracks`).then(r => {
       if (!r.ok) throw new Error(r.statusText)
       return r.json()
     }),
 
   submitTracks: (guestId, tracks) =>
-    fetch(`${API_BASE}/guest/${guestId}/tracks`, {
+    fetch(`${BASE}/guest/${guestId}/tracks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tracks })
@@ -152,22 +118,20 @@ export const api = {
 
   // Admin
   admin: {
-    getSessions: () => fetch(`${API_BASE}/admin/sessions`).then(r => r.json()),
-    getGuests: (sid) => fetch(`${API_BASE}/admin/guests${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
-    getGuestInfo: (sid) => fetch(`${API_BASE}/admin/guest_info${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
-    approveGuest: (id) => fetch(`${API_BASE}/admin/guests/${id}/approve`, { method: 'POST' }).then(r => r.json()),
+    getSessions: () => fetch(`${BASE}/admin/sessions`).then(r => r.json()),
+    getGuests: (sid) => fetch(`${BASE}/admin/guests${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
     getTracks: (gid, sid) => {
       const params = new URLSearchParams();
       if (gid) params.append('guest_id', gid);
       if (sid) params.append('session_id', sid);
       const qs = params.toString() ? `?${params.toString()}` : '';
-      return fetch(`${API_BASE}/admin/tracks${qs}`).then(r => r.json());
+      return fetch(`${BASE}/admin/tracks${qs}`).then(r => r.json());
     },
-    getRecommendations: (sid) => fetch(`${API_BASE}/admin/recommendations${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
-    getPlaylistTracks: (sid) => fetch(`${API_BASE}/admin/playlist_tracks${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
-    deleteSession: (id) => fetch(`${API_BASE}/admin/sessions/${id}`, { method: 'DELETE' }).then(r => r.json()),
-    deleteGuest: (id) => fetch(`${API_BASE}/admin/guests/${id}`, { method: 'DELETE' }).then(r => r.json()),
-    deleteTrack: (id) => fetch(`${API_BASE}/admin/tracks/${id}`, { method: 'DELETE' }).then(r => r.json()),
+    getRecommendations: (sid) => fetch(`${BASE}/admin/recommendations${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
+    getPlaylistTracks: (sid) => fetch(`${BASE}/admin/playlist_tracks${sid ? '?session_id=' + sid : ''}`).then(r => r.json()),
+    deleteSession: (id) => fetch(`${BASE}/admin/sessions/${id}`, { method: 'DELETE' }).then(r => r.json()),
+    deleteGuest: (id) => fetch(`${BASE}/admin/guests/${id}`, { method: 'DELETE' }).then(r => r.json()),
+    deleteTrack: (id) => fetch(`${BASE}/admin/tracks/${id}`, { method: 'DELETE' }).then(r => r.json()),
   }
 }
 

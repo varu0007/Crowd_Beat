@@ -42,10 +42,10 @@ export default function PartyLobby() {
 
   return (
     <div className="page-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 80px)' }}>
-      {/* æ ‡é¢˜åŒº */}
+      {/* 标题区 */}
       <div style={{ textAlign: 'center', marginBottom: 40 }}>
         <h1 style={{ fontSize: '2.5rem', fontWeight: 900, textTransform: 'uppercase', margin: 0 }}>
-          {session?.name || 'æ´¾å¯¹'}
+          {session?.name || '派对'}
         </h1>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
           <span className="badge" style={{ backgroundColor: '#00A859', color: '#fff', border: '3px solid #000', fontSize: '0.85rem', padding: '4px 12px' }}>
@@ -57,9 +57,9 @@ export default function PartyLobby() {
         </div>
       </div>
 
-      {/* ä¸¤ä¸ªå¤§æŒ‰é’® */}
+      {/* 两个大按钮 */}
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 700, width: '100%' }}>
-        {/* å±•ç¤ºå±å¡ç‰‡ */}
+        {/* 展示屏卡片 */}
         <div
           className="nb-card nb-card--interactive"
           onClick={() => window.open(`/display/${sessionId}`, '_blank')}
@@ -76,7 +76,7 @@ export default function PartyLobby() {
           </div>
         </div>
 
-        {/* DJ å·¥ä½œå°å¡ç‰‡ */}
+        {/* DJ 工作台卡片 */}
         <div
           className="nb-card nb-card--interactive"
           onClick={() => navigate(`/dj/${sessionId}`)}
@@ -94,7 +94,7 @@ export default function PartyLobby() {
         </div>
       </div>
 
-      {/* åº•éƒ¨ç»“æŸæ´¾å¯¹ */}
+      {/* 底部结束派对 */}
       <div style={{ marginTop: 48, textAlign: 'center' }}>
         <button
           onClick={handleClose}

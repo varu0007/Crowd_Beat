@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useCrowdBeatWS } from './hooks/useCrowdBeatWS';
-import { api, API_BASE } from './api';
+import { api } from './api';
 import { useI18n } from './i18n';
 import { Mic, Headphones } from 'lucide-react';
+
+const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`;
 
 export default function DisplayScreen() {
   const { t } = useI18n();
@@ -38,7 +40,7 @@ export default function DisplayScreen() {
       fontFamily: "'Space Grotesk', 'Inter', sans-serif",
       display: 'flex', padding: '40px 48px', gap: 48,
     }}>
-      {/* å·¦åˆ— 40% */}
+      {/* 左列 40% */}
       <div style={{ width: '40%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 36 }}>
         {/* Logo */}
         <div style={{ textAlign: 'center' }}>
@@ -50,18 +52,18 @@ export default function DisplayScreen() {
           </div>
         </div>
 
-        {/* QR ç  */}
+        {/* QR 码 */}
         <div style={{
           border: '4px solid #FFE600', padding: 16, backgroundColor: '#fff',
           borderRadius: 8, boxShadow: '0 0 40px rgba(255,230,0,0.3)',
           position: 'relative'
         }}>
           <img
-            src={`${API_BASE}/host/session/${sessionId}/qr`}
+            src={`${API_URL}/host/session/${sessionId}/qr`}
             alt="QR Code"
             style={{ width: 280, height: 280, display: 'block' }}
           />
-          <button
+          <button 
             onClick={() => {
               navigator.clipboard.writeText(`${window.location.origin}/join/${sessionId}`);
               alert(t.linkCopied);
@@ -80,7 +82,7 @@ export default function DisplayScreen() {
           {t.scanToJoin}
         </div>
 
-        {/* è§‚ä¼—æ•°é‡ */}
+        {/* 观众数量 */}
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '3rem', fontWeight: 900, color: '#00A859' }}>
             <Mic size={40} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 8 }} />
@@ -89,7 +91,7 @@ export default function DisplayScreen() {
           <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#aaa' }}>{t.guestsJoined}</div>
         </div>
 
-        {/* è¿žæŽ¥çŠ¶æ€ */}
+        {/* 连接状态 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.95rem', fontWeight: 600, color: '#777' }}>
           <div style={{
             width: 14, height: 14, borderRadius: '50%',
@@ -101,7 +103,7 @@ export default function DisplayScreen() {
         </div>
       </div>
 
-      {/* å³åˆ— 60% */}
+      {/* 右列 60% */}
       <div style={{ width: '60%', display: 'flex', flexDirection: 'column' }}>
         <div style={{
           fontSize: '2rem', fontWeight: 900, color: '#FFE600', textTransform: 'uppercase',
@@ -142,7 +144,7 @@ export default function DisplayScreen() {
           )}
         </div>
 
-        {/* åº•éƒ¨å°å­— */}
+        {/* 底部小字 */}
         <div style={{ textAlign: 'center', paddingTop: 24, fontSize: '0.85rem', color: '#555', fontWeight: 600 }}>
           {t.poweredBy}
         </div>

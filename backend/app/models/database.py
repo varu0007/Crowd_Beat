@@ -1,4 +1,7 @@
-"""CrowdBeat module."""
+"""
+database.py — SQLAlchemy 2.0 异步模型定义
+包含 4 张表: sessions, guests, guest_tracks, recommendations
+"""
 
 import uuid
 from datetime import datetime, timezone
@@ -14,7 +17,6 @@ from sqlalchemy import (
     ForeignKey,
     JSON,
     Index,
-    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import (
@@ -32,20 +34,20 @@ from sqlalchemy.orm import (
 from app.config import get_settings
 
 
-# ---
+# ────────────────────────────────────────────
 # Base
-# ---
+# ────────────────────────────────────────────
 
 class Base(DeclarativeBase):
     pass
 
 
-# ---
+# ────────────────────────────────────────────
 # Models
-# ---
+# ────────────────────────────────────────────
 
 class Session(Base):
-    """Internal helper."""
+    """DJ 活动场次"""
     __tablename__ = "sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -74,7 +76,7 @@ class Session(Base):
     )
 
 class PlaylistTrack(Base):
-    """Internal helper."""
+    """DJ 内部虚拟歌单记录"""
     __tablename__ = "playlist_tracks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -98,7 +100,7 @@ class PlaylistTrack(Base):
 
 
 class Guest(Base):
-    """Internal helper."""
+    """扫码加入的观众"""
     __tablename__ = "guests"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -108,12 +110,9 @@ class Guest(Base):
         UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
     )
     spotify_user_id: Mapped[Optional[str]] = mapped_column(String(100))
-    spotify_username: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(200))
     email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    approval_status: Mapped[str] = mapped_column(String(20), default="approved")
     access_token: Mapped[Optional[str]] = mapped_column(Text)
-
     refresh_token: Mapped[Optional[str]] = mapped_column(Text)
     token_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True)
@@ -134,7 +133,7 @@ class Guest(Base):
 
 
 class GuestTrack(Base):
-    """Internal helper."""
+    """观众的 top tracks + audio features"""
     __tablename__ = "guest_tracks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -164,7 +163,7 @@ class GuestTrack(Base):
 
 
 class Recommendation(Base):
-    """Internal helper."""
+    """推荐结果快照"""
     __tablename__ = "recommendations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -186,30 +185,16 @@ class Recommendation(Base):
     session: Mapped["Session"] = relationship(back_populates="recommendations")
 
 
-class GuestInfo(Base):
-    """Stores guest details for manual whitelisting."""
-    __tablename__ = "guest_info"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True
-    )
-    username: Mapped[str] = mapped_column(String(200))
-    email: Mapped[str] = mapped_column(String(200))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
-
-# ---
+# ────────────────────────────────────────────
 # Async Engine & Session Factory
-# ---
+# ────────────────────────────────────────────
 
 _engine = None
 _async_session_factory = None
 
 
 def get_engine():
-    """Internal helper."""
+    """获取或创建 async engine（延迟初始化）"""
     global _engine
     if _engine is None:
         settings = get_settings()
@@ -223,7 +208,7 @@ def get_engine():
 
 
 def get_session_factory():
-    """Internal helper."""
+    """获取或创建 async session factory"""
     global _async_session_factory
     if _async_session_factory is None:
         _async_session_factory = async_sessionmaker(
@@ -235,7 +220,7 @@ def get_session_factory():
 
 
 async def get_db():
-    """Internal helper."""
+    """FastAPI 依赖注入：提供数据库 session"""
     factory = get_session_factory()
     async with factory() as session:
         try:
@@ -247,61 +232,14 @@ async def get_db():
 
 
 async def init_db():
-    """Internal helper."""
+    """创建所有表（首次启动时调用）"""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_schema_compatibility(conn)
-
-
-async def _ensure_schema_compatibility(conn):
-    """Apply tiny schema repairs for local databases created before model changes."""
-    dialect_name = conn.dialect.name
-    if dialect_name != "postgresql":
-        return
-
-    missing_guest_email = await conn.scalar(text("""
-        SELECT NOT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'guests'
-              AND column_name = 'email'
-        )
-    """))
-    if missing_guest_email:
-        await conn.execute(text("ALTER TABLE guests ADD COLUMN email VARCHAR(200)"))
-
-    missing_spotify_username = await conn.scalar(text("""
-        SELECT NOT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'guests'
-              AND column_name = 'spotify_username'
-        )
-    """))
-    if missing_spotify_username:
-        await conn.execute(text("ALTER TABLE guests ADD COLUMN spotify_username VARCHAR(200)"))
-
-    missing_approval_status = await conn.scalar(text("""
-        SELECT NOT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'guests'
-              AND column_name = 'approval_status'
-        )
-    """))
-    if missing_approval_status:
-        await conn.execute(text("""
-            ALTER TABLE guests
-            ADD COLUMN approval_status VARCHAR(20) NOT NULL DEFAULT 'approved'
-        """))
 
 
 async def close_db():
-    """Internal helper."""
+    """关闭数据库连接池"""
     global _engine, _async_session_factory
     if _engine:
         await _engine.dispose()

@@ -1,4 +1,8 @@
-"""Internal helper."""
+"""
+spotify_service.py — Spotify Web API 封装
+职责：Token 交换、获取用户 top tracks、批量获取 audio features
+使用 spotipy 库作为底层客户端
+"""
 
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -11,7 +15,7 @@ from app.config import get_settings
 
 
 def _get_oauth_manager() -> SpotifyOAuth:
-    """åˆ›å»º SpotifyOAuth ç®¡ç†å™¨ï¼ˆAuthorization Code Flowï¼Œéž PKCEï¼‰"""
+    """创建 SpotifyOAuth 管理器（Authorization Code Flow，非 PKCE）"""
     settings = get_settings()
     return SpotifyOAuth(
         client_id=settings.SPOTIFY_CLIENT_ID,
@@ -23,25 +27,22 @@ def _get_oauth_manager() -> SpotifyOAuth:
     )
 
 
-def get_authorize_url(session_id: str, oauth_state: str | None = None) -> str:
-    """Create Spotify authorization URL.
-
-    Legacy behavior: if oauth_state is not provided, the OAuth state is set to session_id.
-    New behavior: if oauth_state is provided, it will be used as the OAuth state.
+def get_authorize_url(session_id: str) -> str:
+    """
+    生成 Spotify 授权 URL
+    将 session_id 编码进 state 参数，回调时可恢复
     """
     oauth = _get_oauth_manager()
-    state = oauth_state if oauth_state is not None else session_id
-    return oauth.get_authorize_url(state=state)
-
+    return oauth.get_authorize_url(state=session_id)
 
 
 async def exchange_token(code: str) -> dict:
     """
-    ç”¨ authorization code æ¢å– access_token
-    è¿”å›ž: {access_token, refresh_token, expires_at, expires_in}
+    用 authorization code 换取 access_token
+    返回: {access_token, refresh_token, expires_at, expires_in}
     """
     oauth = _get_oauth_manager()
-    # spotipy çš„ get_access_token æ˜¯åŒæ­¥çš„ï¼Œæ”¾åˆ°çº¿ç¨‹æ± æ‰§è¡Œ
+    # spotipy 的 get_access_token 是同步的，放到线程池执行
     loop = asyncio.get_event_loop()
     token_info = await loop.run_in_executor(
         None, lambda: oauth.get_access_token(code, as_dict=True, check_cache=False)
@@ -58,8 +59,8 @@ async def exchange_token(code: str) -> dict:
 
 async def get_current_user(access_token: str) -> dict:
     """
-    èŽ·å–å½“å‰ç”¨æˆ·ä¿¡æ¯
-    è¿”å›ž: {spotify_user_id, display_name}
+    获取当前用户信息
+    返回: {spotify_user_id, display_name}
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
@@ -76,9 +77,9 @@ async def get_user_top_tracks(
     time_range: str = "medium_term",
 ) -> list[dict]:
     """
-    èŽ·å–ç”¨æˆ· top tracks
-    time_range: short_term (4å‘¨), medium_term (6ä¸ªæœˆ), long_term (å…¨éƒ¨)
-    è¿”å›ž: [{spotify_track_id, track_name, artist_name, popularity}]
+    获取用户 top tracks
+    time_range: short_term (4周), medium_term (6个月), long_term (全部)
+    返回: [{spotify_track_id, track_name, artist_name, popularity}]
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
@@ -104,8 +105,8 @@ async def get_audio_features_batch(
     track_ids: list[str],
 ) -> dict[str, dict]:
     """
-    æ‰¹é‡èŽ·å– audio featuresï¼ˆæ¯æ¬¡æœ€å¤š 100 ä¸ª IDï¼‰
-    è¿”å›ž: {track_id: {danceability, energy, valence, tempo, acousticness, instrumentalness}}
+    批量获取 audio features（每次最多 100 个 ID）
+    返回: {track_id: {danceability, energy, valence, tempo, acousticness, instrumentalness}}
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
@@ -130,11 +131,11 @@ async def get_audio_features_batch(
                             "instrumentalness": af.get("instrumentalness"),
                         }
         except Exception as e:
-            # Audio Features API å¯èƒ½å·²å¼ƒç”¨æˆ–æƒé™ä¸è¶³ï¼Œé™é»˜è·³è¿‡
+            # Audio Features API 可能已弃用或权限不足，静默跳过
             print(f"[spotify_service] audio_features error: {e}")
             continue
 
-        # Rate limit ä¿æŠ¤
+        # Rate limit 保护
         if i + batch_size < len(track_ids):
             await asyncio.sleep(0.1)
 
@@ -146,24 +147,28 @@ async def get_recommendations_by_seeds(
     seed_genres: list[str] = None,
     seed_tracks: list[str] = None,
     limit: int = 20,
+    target_features: dict = None,
 ) -> list[dict]:
     """
-    Cold start fallbackï¼šé€šè¿‡ genre/track seed èŽ·å– Spotify æŽ¨è
-    è¿”å›ž: [{spotify_track_id, track_name, artist_name, popularity}]
+    Content-based recommendations via Spotify API.
+    target_features: {danceability, energy, valence, tempo, acousticness, instrumentalness}
+    Returns: [{spotify_track_id, track_name, artist_name, popularity}]
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
 
     kwargs = {"limit": limit}
     if seed_genres:
-        kwargs["seed_genres"] = seed_genres[:5]  # Spotify æœ€å¤š 5 ä¸ª seed
+        kwargs["seed_genres"] = seed_genres[:5]
     if seed_tracks:
         kwargs["seed_tracks"] = seed_tracks[:5]
+    if target_features:
+        for key, val in target_features.items():
+            if val is not None:
+                kwargs[f"target_{key}"] = round(float(val), 4)
 
     try:
-        results = await loop.run_in_executor(
-            None, lambda: sp.recommendations(**kwargs)
-        )
+        results = await loop.run_in_executor(None, lambda: sp.recommendations(**kwargs))
     except Exception as e:
         print(f"[spotify_service] recommendations error: {e}")
         return []
@@ -181,8 +186,8 @@ async def get_recommendations_by_seeds(
 
 async def get_user_playlists(access_token: str, limit: int = 50) -> list[dict]:
     """
-    èŽ·å–ç”¨æˆ·çš„æ’­æ”¾åˆ—è¡¨
-    è¿”å›ž: [{id, name, description, track_count, image_url, owner_name}]
+    获取用户的播放列表
+    返回: [{id, name, description, track_count, image_url, owner_name}]
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
@@ -207,8 +212,8 @@ async def get_user_playlists(access_token: str, limit: int = 50) -> list[dict]:
 
 async def get_user_liked_songs(access_token: str, limit: int = 50) -> dict:
     """
-    èŽ·å–ç”¨æˆ·çš„ Liked Songsï¼ˆæ”¶è—æ­Œæ›²ï¼‰
-    è°ƒç”¨ GET /v1/me/tracks?limit=50
+    获取用户的 Liked Songs（收藏歌曲）
+    调用 GET /v1/me/tracks?limit=50
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
@@ -222,7 +227,7 @@ async def get_user_liked_songs(access_token: str, limit: int = 50) -> dict:
     return {
         "id": "liked_songs",
         "name": "Liked Songs",
-        "description": "ä½ æ”¶è—çš„æ­Œæ›²",
+        "description": "你收藏的歌曲",
         "track_count": track_count,
         "image_url": None,
         "owner_name": "Spotify"
@@ -231,7 +236,7 @@ async def get_user_liked_songs(access_token: str, limit: int = 50) -> dict:
 
 async def get_user_liked_songs_tracks(access_token: str, limit: int = 50) -> list[dict]:
     """
-    èŽ·å–ç”¨æˆ·çš„ Liked Songs æ­Œæ›²åˆ—è¡¨
+    获取用户的 Liked Songs 歌曲列表
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
@@ -261,8 +266,8 @@ async def get_user_liked_songs_tracks(access_token: str, limit: int = 50) -> lis
 
 async def get_playlist_tracks(access_token: str, playlist_id: str, limit: int = 100) -> list[dict]:
     """
-    èŽ·å–æŒ‡å®šæ­Œå•å†…çš„æ›²ç›®
-    è¿”å›ž: [{spotify_track_id, track_name, artist_name, album_name, popularity}]
+    获取指定歌单内的曲目
+    返回: [{spotify_track_id, track_name, artist_name, album_name, popularity}]
     """
     sp = spotipy.Spotify(auth=access_token)
     loop = asyncio.get_event_loop()
@@ -273,9 +278,9 @@ async def get_playlist_tracks(access_token: str, playlist_id: str, limit: int = 
 
     tracks = []
     for item in results.get("items", []):
-        # Spotify API å¯èƒ½ç”¨ 'track' æˆ– 'item' ä½œä¸º key
+        # Spotify API 可能用 'track' 或 'item' 作为 key
         track_obj = item.get("track") or item.get("item")
-        # è¿‡æ»¤æŽ‰ null æˆ–è€…æ˜¯ episode
+        # 过滤掉 null 或者是 episode
         if not track_obj or track_obj.get("type") != "track":
             continue
             

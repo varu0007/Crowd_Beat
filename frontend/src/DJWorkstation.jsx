@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCrowdBeatWS } from './hooks/useCrowdBeatWS';
 import { api } from './api';
@@ -20,15 +20,17 @@ export default function DJWorkstation() {
 
   const { recommendations, guestCount, isConnected } = useCrowdBeatWS(sessionId);
 
-  const addRecommendationBatch = useCallback((batch) => {
+  const batchKey = (batch) =>
+    (batch || []).map(track => track.spotify_track_id || `${track.track_name}-${track.artist_name}`).join('|');
+
+  const addRecommendationBatch = useCallback((batch, { force = false } = {}) => {
     if (!batch || batch.length === 0) return;
+
     setRecHistory(prev => {
-      if (prev.length > 0) {
-        const lastBatch = prev[prev.length - 1];
-        if (lastBatch.length === batch.length && lastBatch[0]?.spotify_track_id === batch[0]?.spotify_track_id) {
-          return prev;
-        }
+      if (!force && prev.length > 0 && batchKey(prev[prev.length - 1]) === batchKey(batch)) {
+        return prev;
       }
+
       const newHistory = [...prev, batch];
       setHistoryIdx(newHistory.length - 1);
       return newHistory;
@@ -50,7 +52,6 @@ export default function DJWorkstation() {
     }).catch(() => {});
   }, [sessionId]);
 
-
   const handleAddTrack = async (track) => {
     const trackId = track.spotify_track_id;
     if (!trackId) return;
@@ -58,15 +59,15 @@ export default function DJWorkstation() {
       await api.addTrackToPlaylist(sessionId, trackId, track.track_name, track.artist_name);
       setAddedTracks(prev => new Set([...prev, trackId]));
       setPlaylistTracks(prev => [...prev, track]);
-    } catch (e) { setError(`Add failed: ${e.message}`); }
+    } catch (e) { setError(`添加失败: ${e.message}`); }
   };
 
   const handleRefresh = async () => {
     try {
       const data = await api.refreshRecommendations(sessionId);
-      addRecommendationBatch(data.recommendations || []);
+      addRecommendationBatch(data.recommendations || [], { force: true });
     }
-    catch (e) { alert(`Refresh failed: ${e.message}`); }
+    catch (e) { alert(`刷新失败: ${e.message}`); }
   };
 
   // Track add button
@@ -107,14 +108,14 @@ export default function DJWorkstation() {
       {error && (
         <div style={{ backgroundColor: '#FF4C4C', color: '#fff', border: '3px solid #000', padding: 12, fontWeight: 700, marginBottom: 20, boxShadow: '4px 4px 0 #000' }}>
           {error}
-          <button onClick={() => setError(null)} style={{ float: 'right', background: 'none', border: 'none', color: '#fff', fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit' }}>X</button>
+          <button onClick={() => setError(null)} style={{ float: 'right', background: 'none', border: 'none', color: '#fff', fontWeight: 900, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
         </div>
       )}
 
-      {/* === Phase 1 and 2: Split columns === */}
+      {/* === 阶段一与二：左右分栏 === */}
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
 
-        {/* === Phase 1: Select Tracks === */}
+        {/* === 阶段一：选歌 === */}
         <div className="nb-card" style={{ flex: '1 1 500px', padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '16px 24px', borderBottom: '4px solid #000', backgroundColor: '#1a1a1a', color: '#FFE600', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -124,17 +125,17 @@ export default function DJWorkstation() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: '0.85rem', fontWeight: 700 }}>
             {recHistory.length > 0 && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', borderRight: '2px solid #555', paddingRight: 16 }}>
-                <button
-                  className="nb-btn nb-btn--small"
-                  disabled={historyIdx === 0}
+                <button 
+                  className="nb-btn nb-btn--small" 
+                  disabled={historyIdx === 0} 
                   onClick={() => setHistoryIdx(i => i - 1)}
                   style={{ padding: '4px 12px', opacity: historyIdx === 0 ? 0.5 : 1 }}
                 >
                   {t.prevRecs}
                 </button>
-                <button
-                  className="nb-btn nb-btn--small"
-                  disabled={historyIdx === recHistory.length - 1}
+                <button 
+                  className="nb-btn nb-btn--small" 
+                  disabled={historyIdx === recHistory.length - 1} 
                   onClick={() => setHistoryIdx(i => i + 1)}
                   style={{ padding: '4px 12px', opacity: historyIdx === recHistory.length - 1 ? 0.5 : 1 }}
                 >
@@ -194,7 +195,7 @@ export default function DJWorkstation() {
         </div>
       </div>
 
-      {/* === Phase 2: Selected Playlist === */}
+      {/* === 阶段二：已选歌单 === */}
           <div className="nb-card" style={{ flex: '1 1 300px', padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '16px 24px', borderBottom: '4px solid #000', backgroundColor: '#00A859', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -226,7 +227,7 @@ export default function DJWorkstation() {
 
       </div>
 
-      {/* Bottom Back Button */}
+      {/* 底部返回 */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 32, marginTop: 24 }}>
         <button
           onClick={() => navigate(`/party/${sessionId}`)}
@@ -234,15 +235,15 @@ export default function DJWorkstation() {
         >
           {t.backToLobby}
         </button>
-
+        
         <button
           onClick={async () => {
-            if (!window.confirm(t.confirmCloseSession || 'Are you sure you want to end this party?')) return;
+            if (!window.confirm('确定要结束当前派对吗？')) return;
             try {
               await api.closeSession(sessionId);
               navigate('/');
             } catch (e) {
-              alert(t.closeFailed ? t.closeFailed(e.message) : `Close failed: ${e.message}`);
+              alert(`关闭失败: ${e.message}`);
             }
           }}
           style={{
@@ -250,7 +251,7 @@ export default function DJWorkstation() {
             fontSize: '0.9rem', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit',
           }}
         >
-          {t.endParty || 'End Party'}
+          结束派对
         </button>
       </div>
     </div>

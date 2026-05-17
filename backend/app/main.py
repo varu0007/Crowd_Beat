@@ -1,5 +1,11 @@
 """
-FastAPI entrypoint for CrowdBeat.
+main.py — FastAPI 应用入口
+职责：
+  - 创建 FastAPI 实例
+  - 注册路由 (auth, session, recommendations)
+  - 配置 CORS
+  - 注册 WebSocket 端点
+  - 管理数据库生命周期
 """
 
 import uuid
@@ -14,26 +20,34 @@ from app.routers import auth, session, recommendations, guest, admin, dj_playlis
 from app.services import crowd_engine
 
 
+# ── Lifespan ──
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize and close shared application resources."""
+    """应用生命周期管理"""
+    # 启动：初始化数据库表
     print("[CrowdBeat] Initializing database...")
     await init_db()
     print("[CrowdBeat] Database ready.")
     yield
+    # 关闭：释放数据库连接池
     print("[CrowdBeat] Shutting down database...")
     await close_db()
     print("[CrowdBeat] Shutdown complete.")
 
 
+# ── App ──
+
 app = FastAPI(
     title="CrowdBeat API",
-    description="Real-time music recommendation system for DJs",
+    description="实时音乐推荐系统 — DJ 用",
     version="0.1.0",
     lifespan=lifespan,
 )
 
 
+# ── CORS ──
+# 延迟加载 settings，允许 .env 缺失时仍能导入模块
 try:
     _settings = get_settings()
     _origins = [
@@ -45,7 +59,7 @@ try:
     ]
 except Exception:
     _origins = [
-        "http://localhost:5173",
+        "http://localhost:5173", 
         "http://127.0.0.1:5173",
         "http://localhost:8888",
         "http://127.0.0.1:8888",
@@ -53,13 +67,14 @@ except Exception:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
-    allow_origin_regex=r"^https://.*\.(vercel\.app|railway\.app|up\.railway\.app)$",
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# ── Routers ──
 
 app.include_router(auth.router)
 app.include_router(session.router)
@@ -69,9 +84,14 @@ app.include_router(admin.router)
 app.include_router(dj_playlist.router)
 
 
+# ── WebSocket ──
+
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    """WebSocket endpoint for live DJ dashboard updates."""
+    """
+    DJ Dashboard WebSocket 端点
+    连接后持续接收推荐更新
+    """
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
@@ -81,8 +101,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await crowd_engine.connect(sid, websocket)
 
     try:
+        # 保持连接，等待客户端消息（ping/pong 或手动操作）
         while True:
             data = await websocket.receive_text()
+            # 可扩展：处理客户端发来的指令
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
@@ -91,7 +113,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await crowd_engine.disconnect(sid, websocket)
 
 
+# ── Health Check ──
+
 @app.get("/health", tags=["system"])
 async def health_check():
-    """Health check endpoint."""
+    """健康检查端点"""
     return {"status": "ok", "service": "crowdbeat-api"}

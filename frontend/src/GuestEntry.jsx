@@ -1,153 +1,154 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useI18n } from './i18n'
+import { Music, PenLine, ArrowLeft, Loader2, PartyPopper } from 'lucide-react'
 import { api } from './api'
+import { useI18n } from './i18n'
 
 export default function GuestEntry() {
   const { t } = useI18n()
   const { sessionId } = useParams()
   const navigate = useNavigate()
-
-  const [username, setUsername] = useState('')
+  const [mode, setMode] = useState(null) // null | 'spotify' | 'manual'
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [guestId, setGuestId] = useState('')
-  const [approvalStatus, setApprovalStatus] = useState('idle')
-  const [submitting, setSubmitting] = useState(false)
-
-  const isDisabled = useMemo(() => {
-    const u = (username || '').trim()
-    const e = (email || '').trim()
-    return u.length < 2 || !e.includes('@')
-  }, [username, email])
 
   useEffect(() => {
-    if (!guestId || approvalStatus !== 'pending') return undefined
-
-    const poll = async () => {
-      try {
-        const status = await api.getGuestApprovalStatus(guestId)
-        setApprovalStatus(status.approval_status || 'pending')
-      } catch (err) {
-        setError(err.message || 'Failed to check approval status')
-      }
+    if (mode === 'spotify' && sessionId) {
+      window.location.href = api.guestLoginUrl(sessionId)
     }
+  }, [mode, sessionId])
 
-    const timer = setInterval(poll, 3000)
-    poll()
-    return () => clearInterval(timer)
-  }, [guestId, approvalStatus])
-
-  const handleSubmit = async (e) => {
+  const handleManualSubmit = async (e) => {
     e.preventDefault()
+    if (!name.trim()) { setError('Please enter your name.'); return }
+    if (!email.trim()) { setError('Please enter your email.'); return }
     setError('')
-
-    const u = (username || '').trim()
-    const em = (email || '').trim()
-    if (u.length < 2) return setError('Please enter your username')
-    if (!em.includes('@')) return setError('Please enter a valid email')
-    if (!sessionId) return setError('Missing session id')
-
-    setSubmitting(true)
+    setLoading(true)
     try {
-      const request = await api.requestGuestApproval(sessionId, { username: u, email: em })
-      setGuestId(request.guest_id)
-      setApprovalStatus(request.approval_status || 'pending')
+      await api.joinManual(sessionId, name.trim(), email.trim())
+      navigate('/guest-success')
     } catch (err) {
-      setError(err.message || 'Approval request failed')
+      setError(err.message || 'Failed to join. Please try again.')
     } finally {
-      setSubmitting(false)
+      setLoading(false)
     }
   }
 
-  const handleConnectSpotify = () => {
-    const u = (username || '').trim()
-    const em = (email || '').trim()
-    const url = api.guestLoginWithProfileUrl(sessionId, { username: u, email: em }, guestId)
-    window.location.href = url
+  // Mode selection screen
+  if (mode === null) {
+    return (
+      <div className="page-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <div className="nb-card" style={{ textAlign: 'center', padding: '40px 24px', maxWidth: 400, width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+            <PartyPopper size={48} color="#00A859" />
+          </div>
+          <h2 style={{ fontSize: '1.8rem', fontWeight: 900, marginBottom: 8 }}>Join the Party</h2>
+          <p style={{ color: '#555', fontWeight: 600, marginBottom: 32 }}>Choose how you want to join</p>
+
+          <button
+            onClick={() => setMode('spotify')}
+            style={{
+              width: '100%', padding: '14px', fontWeight: 800, fontSize: '1rem',
+              backgroundColor: '#1DB954', color: '#fff',
+              border: '3px solid #000', boxShadow: '4px 4px 0 #000',
+              cursor: 'pointer', marginBottom: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}
+          >
+            <Music size={18} /> Connect with Spotify
+          </button>
+
+          <button
+            onClick={() => setMode('manual')}
+            style={{
+              width: '100%', padding: '14px', fontWeight: 800, fontSize: '1rem',
+              backgroundColor: '#fff', color: '#000',
+              border: '3px solid #000', boxShadow: '4px 4px 0 #000',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}
+          >
+            <PenLine size={18} /> Join with Name + Email
+          </button>
+        </div>
+      </div>
+    )
   }
 
-  const isPending = approvalStatus === 'pending'
-  const isApproved = approvalStatus === 'approved' || approvalStatus === 'connected'
-
-  return (
-    <div style={{ padding: '2rem', maxWidth: 520, margin: '0 auto' }}>
-      <h2 style={{ fontWeight: 900, fontSize: '1.6rem', marginBottom: 12 }}>Join with Spotify</h2>
-      <p style={{ color: '#666', marginBottom: 18 }}>
-        Enter your details so we can associate your Spotify account with your guest profile.
-      </p>
-
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontWeight: 800 }}>
-          Username
-          <input
-            value={username}
-            onChange={(ev) => setUsername(ev.target.value)}
-            placeholder="e.g. Sam"
-            disabled={isPending || isApproved}
-            style={{ padding: 12, border: '3px solid #000', fontSize: '1rem' }}
-          />
-        </label>
-
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontWeight: 800 }}>
-          Email
-          <input
-            value={email}
-            onChange={(ev) => setEmail(ev.target.value)}
-            placeholder="e.g. sam@email.com"
-            disabled={isPending || isApproved}
-            style={{ padding: 12, border: '3px solid #000', fontSize: '1rem' }}
-          />
-        </label>
-
-        {error ? (
-          <div style={{ background: '#FF4C4C', color: '#fff', padding: 10, border: '3px solid #000', fontWeight: 900 }}>
-            {error}
-          </div>
-        ) : null}
-
-        {isPending ? (
-          <div style={{ padding: 14, border: '3px solid #000', background: '#FFF4B8', fontWeight: 900 }}>
-            We're authorizing you wait please
-          </div>
-        ) : null}
-
-        {isApproved ? (
-          <>
-            <div style={{ padding: 14, border: '3px solid #000', background: '#D4F8D4', fontWeight: 900 }}>
-              you're authorized, connect to spotify
-            </div>
-            <button
-              type="button"
-              className="nb-btn nb-btn--primary"
-              onClick={handleConnectSpotify}
-              style={{ padding: '12px 16px', fontSize: '1rem', fontWeight: 900 }}
-            >
-              {t.connectSpotify || 'Connect Spotify'}
-            </button>
-          </>
-        ) : null}
-
-        {!isPending && !isApproved ? (
+  // Manual form screen
+  if (mode === 'manual') {
+    return (
+      <div className="page-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <div className="nb-card" style={{ padding: '40px 24px', maxWidth: 400, width: '100%' }}>
           <button
-            type="submit"
-            disabled={isDisabled || submitting}
-            className="nb-btn nb-btn--primary"
-            style={{ padding: '12px 16px', fontSize: '1rem', fontWeight: 900, cursor: isDisabled || submitting ? 'not-allowed' : 'pointer' }}
+            onClick={() => { setMode(null); setError('') }}
+            style={{ background: 'none', border: 'none', fontWeight: 700, cursor: 'pointer', marginBottom: 16, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 4 }}
           >
-            {submitting ? 'Submitting...' : (t.connectSpotify || 'Continue to Spotify')}
+            <ArrowLeft size={16} /> Back
           </button>
-        ) : null}
+          <h2 style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: 24 }}>Enter Your Info</h2>
 
-        <button
-          type="button"
-          className="nb-btn nb-btn--ghost"
-          onClick={() => navigate('/')}
-          style={{ padding: '10px 16px', fontSize: '0.95rem', fontWeight: 800 }}
-        >
-          {t.backToHome || 'Back'}
-        </button>
-      </form>
+          <form onSubmit={handleManualSubmit}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>Name</label>
+              <input
+                className="nb-input"
+                style={{ width: '100%', boxSizing: 'border-box' }}
+                placeholder="Your name"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>Email</label>
+              <input
+                className="nb-input"
+                style={{ width: '100%', boxSizing: 'border-box' }}
+                type="email"
+                placeholder="your@email.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+
+            {error && (
+              <div style={{ color: '#c00', fontWeight: 700, marginBottom: 16, fontSize: '0.9rem' }}>
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                width: '100%', padding: '14px', fontWeight: 800, fontSize: '1rem',
+                backgroundColor: loading ? '#ccc' : '#000', color: '#fff',
+                border: '3px solid #000', boxShadow: loading ? 'none' : '4px 4px 0 #555',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+            >
+              {loading ? <><Loader2 size={18} className="animate-spin" /> Joining...</> : 'Join Party'}
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
+  // Spotify redirect in progress
+  return (
+    <div className="page-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <Loader2 size={48} className="animate-spin" />
+        </div>
+        <div style={{ fontWeight: 700 }}>{t.redirectingToSpotify}</div>
+      </div>
     </div>
   )
 }

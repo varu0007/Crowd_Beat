@@ -1,4 +1,10 @@
-"""Internal helper."""
+"""
+session.py — DJ Session 管理路由
+端点：
+  POST   /host/session            → 创建新 session
+  GET    /host/session/{id}       → 查询 session 状态
+  DELETE /host/session/{id}       → 关闭 session
+"""
 
 import io
 import uuid
@@ -24,14 +30,14 @@ from app.services import crowd_engine
 router = APIRouter(prefix="/host", tags=["session"])
 
 
-# ---
+# ── Request / Response Schemas ──
 
 class SessionCreateRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200, description="åœºæ¬¡åç§°")
+    name: str = Field(..., min_length=1, max_length=200, description="场次名称")
     genre_seeds: list[str] = Field(
         default=[],
         max_length=5,
-        description="Cold start é¢„è®¾æµæ´¾ (æœ€å¤š5ä¸ª)",
+        description="Cold start 预设流派 (最多5个)",
     )
 
 
@@ -48,14 +54,14 @@ class SessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ---
+# ── Endpoints ──
 
 @router.post("/session", response_model=SessionResponse)
 async def create_session(
     req: SessionCreateRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """DJ åˆ›å»ºæ–°çš„æ´»åŠ¨åœºæ¬¡"""
+    """DJ 创建新的活动场次"""
     new_session = DBSession(
         name=req.name,
         genre_seeds=req.genre_seeds,
@@ -84,7 +90,7 @@ async def get_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """æŸ¥è¯¢ session çŠ¶æ€"""
+    """查询 session 状态"""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
@@ -95,7 +101,7 @@ async def get_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # ç»Ÿè®¡ guest æ•°é‡
+    # 统计 guest 数量
     guest_count_result = await db.execute(
         select(func.count()).where(Guest.session_id == sid)
     )
@@ -121,7 +127,7 @@ async def delete_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """DJ å…³é—­ sessionï¼ˆé€»è¾‘åˆ é™¤ï¼Œæ›´æ–°çŠ¶æ€ä¸º closedï¼‰"""
+    """DJ 关闭 session（逻辑删除，更新状态为 closed）"""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
@@ -136,7 +142,7 @@ async def delete_session(
     session.closed_at = datetime.now(timezone.utc)
     await db.flush()
 
-    # é€šçŸ¥ WebSocket å®¢æˆ·ç«¯ session å·²å…³é—­
+    # 通知 WebSocket 客户端 session 已关闭
     await crowd_engine.broadcast(sid, {
         "type": "session_closed",
         "session_id": session_id,
@@ -148,14 +154,14 @@ async def delete_session(
 
 @router.get("/session/{session_id}/qr")
 async def get_session_qr(session_id: str):
-    """ç”Ÿæˆ QR ç å›¾ç‰‡ï¼ˆPNGï¼‰ï¼Œguest æ‰«ç åŽè·³è½¬åˆ° /auth/login"""
+    """生成 QR 码图片（PNG），guest 扫码后跳转到 /auth/login"""
     try:
         uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session_id")
 
     settings = get_settings()
-    # QR ç å†…å®¹æŒ‡å‘åŽç«¯ auth/login ç«¯ç‚¹
+    # QR 码内容指向后端 auth/login 端点
     join_url = f"{settings.FRONTEND_URL}/join/{session_id}"
 
     qr = qrcode.QRCode(
