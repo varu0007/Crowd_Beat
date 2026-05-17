@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.database import get_db, Guest, GuestTrack, Session as DBSession
+from app.models.database import get_db, Guest, GuestTrack
 from app.services import spotify_service, crowd_engine
 
 router = APIRouter(prefix="/guest", tags=["guest"])
@@ -17,37 +17,6 @@ router = APIRouter(prefix="/guest", tags=["guest"])
 
 class PlaylistSelection(BaseModel):
     playlist_ids: List[str]
-
-
-class ManualGuestRequest(BaseModel):
-    session_id: str
-    display_name: str
-    email: str
-
-
-@router.post("/manual")
-async def join_manual(payload: ManualGuestRequest, db: AsyncSession = Depends(get_db)):
-    """Join as guest without Spotify - name + email only"""
-    try:
-        sid = uuid.UUID(payload.session_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid session_id")
-
-    result = await db.execute(
-        select(DBSession).where(DBSession.id == sid, DBSession.status == "active")
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Session not found or closed")
-
-    guest = Guest(
-        session_id=sid,
-        display_name=payload.display_name,
-        email=payload.email,
-    )
-    db.add(guest)
-    await db.flush()
-
-    return {"guest_id": str(guest.id), "display_name": guest.display_name}
 
 
 class TrackSelection(BaseModel):

@@ -1,21 +1,16 @@
 """
-ml_engine.py - Recommendation engine
-
-Primary path: Content-based filtering via Spotify Recommendations API
-  1. Compute average audio feature vector from all guest tracks (crowd profile)
-  2. Call Spotify /recommendations with seed_genres + target features
-  3. Returns real, existing Spotify tracks
-
-Fallback (LLM): Used when DJ is not connected to Spotify or Spotify API fails
+ml_engine.py — 推荐算法引擎
+职责：
+  - 正常模式：使用 Groq API (LLaMA 3) 进行推荐
+  - Cold start：host 预设 genre fallback
 """
 
 import uuid
+from datetime import datetime, timezone
+from typing import Optional
 import json
 import os
 import re
-import hashlib
-import asyncio
-from datetime import datetime, timezone
 from collections import defaultdict
 
 import numpy as np
@@ -25,71 +20,314 @@ from groq import Groq
 from duckduckgo_search import DDGS
 
 from app.config import get_settings
-from app.models.database import Session as DBSession, Guest, GuestTrack, Recommendation
+from app.models.database import (
+    Session as DBSession,
+    Guest,
+    GuestTrack,
+    Recommendation,
+)
 from app.services import spotify_service
 
 
-# ---------------------------------------------------------------------------
-# Crowd feature computation
-# ---------------------------------------------------------------------------
-
-def _compute_crowd_features(guest_tracks: list) -> dict:
-    """
-    Average audio features across all guest tracks to build a crowd profile.
-    Only includes features where data exists (audio features may be null if
-    Spotify API returned no data for some tracks).
-    """
-    feature_keys = ["danceability", "energy", "valence", "acousticness", "instrumentalness"]
-    result = {}
-    for key in feature_keys:
-        values = [getattr(t, key) for t in guest_tracks if getattr(t, key) is not None]
-        if values:
-            result[key] = sum(values) / len(values)
-    tempos = [t.tempo for t in guest_tracks if t.tempo is not None]
-    if tempos:
-        result["tempo"] = sum(tempos) / len(tempos)
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Internet search for LLM context
-# ---------------------------------------------------------------------------
-
 def _fetch_internet_context(genre_str: str) -> str:
+    """使用 DuckDuckGo 搜索最新的流行曲目，给大模型补充知识盲区。"""
     try:
-        results = DDGS().text(
-            f"trending {genre_str} artists 2024 2025 who are popular now",
-            max_results=8
-        )
+        results = DDGS().text(f"top {genre_str} hit singles tracks 2024 2025 2026", max_results=10)
         if results:
-            context = "\n".join([f"- {r['title']}" for r in results])
-            return context[:1000]
+            context = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+            return context
     except Exception as e:
-        print(f"[ml_engine] internet search error: {e}")
+        print(f"[Internet Search Error] {e}")
     return "No internet context available."
 
+async def recompute(
+    session_id: uuid.UUID,
+    db: AsyncSession,
+) -> list[dict]:
+    """
+    使用 Groq API (LLaMA 3) 重新计算推荐列表。
+    """
+    print(f"[debug] recompute called, session_id={session_id}")
+    settings = get_settings()
 
-# ---------------------------------------------------------------------------
-# Save helpers
-# ---------------------------------------------------------------------------
+    # 1. 查询该 session 所有 guest_tracks
+    stmt = text("""
+        SELECT gt.track_name, gt.artist_name, gt.popularity, g.display_name
+        FROM guest_tracks gt
+        JOIN guests g ON gt.guest_id = g.id
+        WHERE g.session_id = :session_id
+    """)
+    result = await db.execute(stmt, {"session_id": session_id})
+    rows = result.fetchall()
+    print(f"[debug] found {len(rows)} tracks")
+
+    # 2. 没数据返回 []
+    if not rows:
+        return []
+
+    # 3. 统计 guest 数量，< 2 人走 cold_start_fallback
+    guest_tracks_map = defaultdict(list)
+    for row in rows:
+        guest_tracks_map[row.display_name].append({
+            "track": row.track_name,
+            "artist": row.artist_name
+        })
+
+    guest_count = len(guest_tracks_map)
+    print(f"[debug] guest_count={guest_count}")
+    if guest_count < 2:
+        session_result = await db.execute(
+            select(DBSession).where(DBSession.id == session_id)
+        )
+        db_session = session_result.scalar_one_or_none()
+        if not db_session:
+            return []
+            
+        tracks_result = await db.execute(
+            select(GuestTrack).join(Guest, GuestTrack.guest_id == Guest.id).where(Guest.session_id == session_id)
+        )
+        all_tracks = tracks_result.scalars().all()
+        return await _cold_start_fallback(session_id, db_session, db, guest_count, all_tracks)
+
+    # 4. 按 guest 分组整理歌曲，每人最多取 10 首
+    guest_lines = []
+    for guest_name, tracks in guest_tracks_map.items():
+        limited_tracks = tracks[:10]
+        track_strs = [f"{t['track']} - {t['artist']}" for t in limited_tracks]
+        guest_lines.append(f"Guest '{guest_name}' likes: " + ", ".join(track_strs))
+
+    guest_info_str = "\n".join(guest_lines)
+
+    genre_result = await db.execute(text(
+        "SELECT genre_seeds FROM sessions WHERE id = :session_id"
+    ), {"session_id": session_id})
+    session_row = genre_result.mappings().first()
+    genre_seeds = session_row["genre_seeds"] if session_row and session_row["genre_seeds"] else []
+    genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
+
+    print(f"[debug] fetching internet context for {genre_str}...")
+    import asyncio
+    internet_context = await asyncio.to_thread(_fetch_internet_context, genre_str)
+
+    prompt = f"""You are an elite, modern DJ assistant.
+
+DJ's strictly set party genre(s): {genre_str}
+
+LATEST INTERNET SEARCH CONTEXT (Use this to find brand new songs!):
+{internet_context}
+
+Guests' musical tastes (for reference only, NEVER use this to break the DJ's genre rules):
+{guest_info_str}
+
+Please recommend exactly 20 songs suitable for the current party.
+CRITICAL Recommendation Requirements:
+- NO HALLUCINATIONS / REAL SINGLES ONLY: You MUST recommend verified, real, individual song tracks. Do NOT recommend compilation albums, generic genre labels, or playlist titles.
+- DO NOT INVENT SONGS: If the internet context does not contain enough clear, unambiguous song names, IGNORE THE CONTEXT and use your own pre-trained knowledge. NEVER invent song titles or use placeholders like "New Artist".
+- DO NOT SPLIT ALBUM NAMES: Do NOT hallucinate fake song titles by splitting an album name or using a record label name as an artist (e.g., "Snatch! Records" is not an artist).
+- TIME FRAME: MUST be extremely recent, released within the last 2-3 years maximum (2024-2026). Do NOT recommend songs older than 2023.
+- GENRE: The songs MUST strictly align with the DJ's set genres: {genre_str}.
+- AVOID OUTDATED SONGS: Absolutely NO cliché, overplayed, or outdated "generic party" anthems (e.g., do not recommend "Sandstorm" or "Macarena").
+- Ensure the vibe is suitable for a live party atmosphere within the specific requested genres.
+- Do not repeat songs already submitted by the guests.
+
+Return strictly in JSON format, do not include any other text:
+[{{ "track_name": "Song Name", "artist_name": "Artist Name", "reason": "Brief reason including release year" }}]"""
+
+    # 6. 调用 Groq
+    try:
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        print(f"[debug] GROQ_API_KEY starts with: {str(os.getenv('GROQ_API_KEY'))[:10]}")
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.7
+        )
+        response_text = response.choices[0].message.content
+    except Exception as e:
+        print(f"[Groq API Error] {e}")
+        return []
+
+    # 7. JSON 解析
+    try:
+        recommendations_data = json.loads(response_text)
+    except json.JSONDecodeError:
+        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if match:
+            try:
+                recommendations_data = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                print("[JSON Parse Error] fallback match failed.")
+                return []
+        else:
+            print("[JSON Parse Error] Could not find JSON array.")
+            return []
+
+    if not isinstance(recommendations_data, list):
+        return []
+
+    # 取 top 20
+    recommendations_data = recommendations_data[:20]
+
+    # 8. DELETE 旧 recommendations, INSERT Top-20
+    await db.execute(
+        delete(Recommendation).where(Recommendation.session_id == session_id)
+    )
+
+    now = datetime.now(timezone.utc)
+    results = []
+    for i, item in enumerate(recommendations_data):
+        rank = i + 1
+        score = 1.0 - (rank - 1) * 0.04
+        track_name = item.get("track_name", "Unknown Track")
+        artist_name = item.get("artist_name", "Unknown Artist")
+        spotify_track_id = f"llm_{rank}"
+
+        rec = Recommendation(
+            session_id=session_id,
+            spotify_track_id=spotify_track_id,
+            track_name=track_name,
+            artist_name=artist_name,
+            score=score,
+            rank=rank,
+            generated_at=now,
+            guest_count=guest_count,
+            is_cold_start=False,
+        )
+        db.add(rec)
+        results.append({
+            "spotify_track_id": spotify_track_id,
+            "track_name": track_name,
+            "artist_name": artist_name,
+            "score": score,
+            "rank": rank,
+            "is_cold_start": False,
+        })
+
+    # 9. await db.commit()，返回列表
+    await db.commit()
+    return results
+
+
+async def _cold_start_fallback(
+    session_id: uuid.UUID,
+    db_session: "DBSession",
+    db: AsyncSession,
+    guest_count: int,
+    existing_tracks: list[GuestTrack] = None,
+) -> list[dict]:
+    """
+    Cold start 处理 (Groq API 版本)：
+    - 使用 host 预设的 genre_seeds
+    - 如果有少量 guest tracks，提取一些歌曲名称作为上下文
+    - 调用 Groq API 生成推荐
+    """
+    settings = get_settings()
+    genre_seeds = db_session.genre_seeds or []
+    genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
+    crowd_summary = ""
+    if existing_tracks:
+        track_names = [f"{t.track_name} - {t.artist_name}" for t in existing_tracks[:10]]
+        crowd_summary = ", ".join(track_names)
+
+    print(f"[debug] fetching internet context for {genre_str}...")
+    import asyncio
+    internet_context = await asyncio.to_thread(_fetch_internet_context, genre_str)
+
+    prompt = f"""You are an elite, modern DJ assistant, specializing strictly in {genre_str} music.
+
+Current party genre setting: {genre_str}
+
+LATEST INTERNET SEARCH CONTEXT (Use this to find brand new songs!):
+{internet_context}
+
+{"Here is the musical taste of existing guests: " + crowd_summary if crowd_summary else ""}
+
+Please strictly recommend 20 songs in the {genre_str} style.
+CRITICAL Requirements:
+- NO HALLUCINATIONS / REAL SINGLES ONLY: You MUST recommend verified, real, individual song tracks. Do NOT recommend compilation albums, generic genre labels, or playlist titles.
+- DO NOT INVENT SONGS: If the internet context lacks 20 real songs, rely on your internal knowledge. NEVER invent songs or use "New Artist".
+- DO NOT SPLIT ALBUM NAMES: Do NOT hallucinate fake song titles by splitting an album name or confusing record labels with artists.
+- TIME FRAME: MUST be extremely recent, released within the last 2-3 years maximum (2024-2026). Do NOT recommend older songs.
+- GENRE: MUST be strictly of the {genre_str} style.
+- AVOID OUTDATED SONGS: Absolutely NO cliché, overplayed, or outdated "generic party" anthems.
+- Ensure the vibe is suitable for a live party atmosphere within the requested genre constraints.
+
+Return strictly in JSON format, do not include any other text:
+[{{ "track_name": "Song Name", "artist_name": "Artist Name", "reason": "Brief reason including release year" }}]"""
+
+    try:
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        print(f"[debug] GROQ_API_KEY starts with: {str(os.getenv('GROQ_API_KEY'))[:10]}")
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.7
+        )
+        response_text = response.choices[0].message.content
+    except Exception as e:
+        print(f"[Groq API Error] Cold Start: {e}")
+        return []
+
+    try:
+        recommendations_data = json.loads(response_text)
+    except json.JSONDecodeError:
+        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if match:
+            try:
+                recommendations_data = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return []
+        else:
+            return []
+
+    if not isinstance(recommendations_data, list):
+        return []
+
+    top_n = []
+    for i, rec in enumerate(recommendations_data[:20]):
+        top_n.append({
+            "spotify_track_id": f"llm_cold_{i+1}",
+            "track_name": rec.get("track_name", "Unknown Track"),
+            "artist_name": rec.get("artist_name", "Unknown Artist"),
+            "score": 1.0 - (i * 0.01),
+        })
+
+    recommendations = await _save_recommendations(
+        session_id, top_n, db, guest_count, is_cold_start=True
+    )
+    return recommendations
+
 
 async def _save_recommendations(
     session_id: uuid.UUID,
-    tracks: list[dict],
+    top_n: list[dict],
     db: AsyncSession,
     guest_count: int,
     is_cold_start: bool,
 ) -> list[dict]:
-    await db.execute(delete(Recommendation).where(Recommendation.session_id == session_id))
+    """将推荐结果写入数据库（先删旧数据再插入）"""
+    # 删除该 session 的旧推荐
+    await db.execute(
+        delete(Recommendation).where(Recommendation.session_id == session_id)
+    )
+
     now = datetime.now(timezone.utc)
     results = []
-    for rank, item in enumerate(tracks[:10], start=1):
+    for rank, item in enumerate(top_n, start=1):
         rec = Recommendation(
             session_id=session_id,
             spotify_track_id=item["spotify_track_id"],
             track_name=item["track_name"],
             artist_name=item["artist_name"],
-            score=item.get("score", 1.0 - (rank - 1) * 0.04),
+            score=item["score"],
             rank=rank,
             generated_at=now,
             guest_count=guest_count,
@@ -100,272 +338,10 @@ async def _save_recommendations(
             "spotify_track_id": item["spotify_track_id"],
             "track_name": item["track_name"],
             "artist_name": item["artist_name"],
-            "score": rec.score,
+            "score": item["score"],
             "rank": rank,
             "is_cold_start": is_cold_start,
         })
-    await db.commit()
+
+    await db.flush()
     return results
-
-
-# ---------------------------------------------------------------------------
-# Primary: Spotify content-based filtering
-# ---------------------------------------------------------------------------
-
-async def _spotify_recompute(
-    session_id: uuid.UUID,
-    dj_token: str,
-    genre_seeds: list[str],
-    guest_tracks: list,
-    already_added_ids: set,
-    guest_count: int,
-    db: AsyncSession,
-) -> list[dict] | None:
-    """
-    Use Spotify Recommendations API with crowd audio feature targets.
-    Returns None if the API call fails (triggers LLM fallback).
-    """
-    target_features = _compute_crowd_features(guest_tracks) if guest_tracks else {}
-
-    print(f"[ml_engine] Spotify recs: genres={genre_seeds}, features={target_features}")
-
-    tracks = await spotify_service.get_recommendations_by_seeds(
-        access_token=dj_token,
-        seed_genres=genre_seeds[:5] if genre_seeds else ["pop"],
-        limit=30,
-        target_features=target_features or None,
-    )
-
-    if not tracks:
-        print("[ml_engine] Spotify recommendations returned empty, falling back to LLM")
-        return None
-
-    # Filter already-added tracks and deduplicate
-    seen = set(already_added_ids)
-    filtered = []
-    for t in tracks:
-        if t["spotify_track_id"] not in seen:
-            seen.add(t["spotify_track_id"])
-            filtered.append(t)
-
-    if not filtered:
-        return None
-
-    # Score by popularity, take top 10
-    filtered.sort(key=lambda x: x.get("popularity", 0), reverse=True)
-    top = [dict(t, score=1.0 - i * 0.04) for i, t in enumerate(filtered[:10])]
-
-    is_cold = len(guest_tracks) == 0
-    return await _save_recommendations(session_id, top, db, guest_count, is_cold_start=is_cold)
-
-
-# ---------------------------------------------------------------------------
-# Fallback: LLM-based recommendations
-# ---------------------------------------------------------------------------
-
-async def _llm_recompute(
-    session_id: uuid.UUID,
-    genre_seeds: list[str],
-    guest_tracks: list,
-    already_added_text: str,
-    guest_count: int,
-    db: AsyncSession,
-) -> list[dict]:
-    genre_str = ", ".join(genre_seeds) if genre_seeds else "any suitable party genre"
-
-    # Build guest info string
-    guest_tracks_map = defaultdict(list)
-    for t in guest_tracks:
-        guest_tracks_map[t.display_name].append({"track": t.track_name, "artist": t.artist_name})
-
-    if guest_tracks_map:
-        guest_lines = []
-        for name, tracks in guest_tracks_map.items():
-            strs = [f"{t['track']} - {t['artist']}" for t in tracks[:10]]
-            guest_lines.append(f"Guest '{name}' likes: " + ", ".join(strs))
-        guest_info_str = "\n".join(guest_lines)
-    else:
-        guest_info_str = "No guest data yet."
-
-    internet_context = await asyncio.to_thread(_fetch_internet_context, genre_str)
-
-    prompt = f"""You are an elite, modern DJ assistant.
-
-ABSOLUTE #1 RULE - GENRE LOCK: Every single song you recommend MUST be {genre_str}. This overrides every other rule. If any song is not clearly {genre_str}, do not include it.
-
-DJ's party genre: {genre_str}
-
-TRENDING ARTISTS CONTEXT (use as inspiration only):
-{internet_context}
-
-Guests' submitted tracks (reference only, genre lock still applies):
-{guest_info_str}
-
-ALREADY ADDED TO PLAYLIST (DO NOT RECOMMEND AGAIN):
-{already_added_text}
-
-Recommend exactly 10 songs. All 10 must be {genre_str}.
-
-For new_hits: 5 fresh {genre_str} tracks not in the guest list above.
-For guest_picks: up to 5 tracks from the guest list that are genuinely {genre_str}. If fewer than 5 qualify, fill the remaining slots in new_hits instead. NEVER include an off-genre song just to fill a guest_picks slot.
-
-Other requirements:
-- Real, verified songs only. No hallucinated titles or album names.
-- Prefer post-2020 releases. No overplayed party cliches.
-- Zero overlap between new_hits and guest_picks.
-- Every song must have a real artist name you are certain about.
-
-Return strictly in this JSON format with no other text:
-{{
-  "new_hits": [
-    {{ "track_name": "Song Name", "artist_name": "Artist Name", "reason": "Brief reason" }}
-  ],
-  "guest_picks": [
-    {{ "track_name": "Song Name", "artist_name": "Artist Name", "reason": "Brief reason" }}
-  ]
-}}"""
-
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.7,
-        )
-        response_text = response.choices[0].message.content
-    except Exception as e:
-        print(f"[ml_engine] Groq API error: {e}")
-        return []
-
-    # Parse JSON
-    parsed = None
-    try:
-        parsed = json.loads(response_text)
-    except json.JSONDecodeError:
-        match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                return []
-
-    if not parsed:
-        return []
-
-    items = []
-    if isinstance(parsed, dict):
-        for item in parsed.get("new_hits", [])[:5]:
-            item["source"] = "new"
-            items.append(item)
-        for item in parsed.get("guest_picks", [])[:5]:
-            item["source"] = "guest"
-            items.append(item)
-    elif isinstance(parsed, list):
-        items = parsed[:10]
-
-    tracks = []
-    for i, item in enumerate(items):
-        t_name = item.get("track_name", "Unknown Track")
-        a_name = item.get("artist_name", "Unknown Artist")
-        source = item.get("source", "new")
-        safe = f"{t_name}-{a_name}".lower().encode("utf-8")
-        tracks.append({
-            "spotify_track_id": f"llm_{source}_{hashlib.md5(safe).hexdigest()[:10]}",
-            "track_name": t_name,
-            "artist_name": a_name,
-            "score": 1.0 - i * 0.04,
-        })
-
-    is_cold = len(guest_tracks) == 0
-    return await _save_recommendations(session_id, tracks, db, guest_count, is_cold_start=is_cold)
-
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
-async def recompute(session_id: uuid.UUID, db: AsyncSession) -> list[dict]:
-    print(f"[ml_engine] recompute called, session_id={session_id}")
-
-    # 1. Tracks already added to DJ playlist (exclude from recommendations)
-    playlist_result = await db.execute(text(
-        "SELECT track_name, artist_name, spotify_track_id FROM playlist_tracks WHERE session_id = :sid"
-    ), {"sid": session_id})
-    playlist_rows = playlist_result.fetchall()
-
-    previous_result = await db.execute(text(
-        "SELECT track_name, artist_name, spotify_track_id FROM recommendations WHERE session_id = :sid"
-    ), {"sid": session_id})
-    previous_rows = previous_result.fetchall()
-
-    already_added_ids = {
-        r.spotify_track_id
-        for r in [*playlist_rows, *previous_rows]
-        if r.spotify_track_id
-    }
-    excluded_lines = [
-        f"{r.track_name} - {r.artist_name}"
-        for r in [*playlist_rows, *previous_rows]
-        if r.track_name and r.artist_name
-    ]
-    already_added_text = "\n".join(excluded_lines) or "None"
-
-    # 2. Session genre seeds
-    session_result = await db.execute(select(DBSession).where(DBSession.id == session_id))
-    db_session = session_result.scalar_one_or_none()
-    if not db_session:
-        return []
-    genre_seeds = db_session.genre_seeds or []
-
-    # 3. All guest tracks for this session (with audio features + display_name)
-    rows = await db.execute(text("""
-        SELECT gt.spotify_track_id, gt.track_name, gt.artist_name,
-               gt.danceability, gt.energy, gt.valence, gt.tempo,
-               gt.acousticness, gt.instrumentalness, gt.popularity,
-               g.display_name
-        FROM guest_tracks gt
-        JOIN guests g ON gt.guest_id = g.id
-        WHERE g.session_id = :sid
-    """), {"sid": session_id})
-
-    class _Track:
-        pass
-
-    guest_tracks = []
-    for r in rows.fetchall():
-        t = _Track()
-        for col in ("spotify_track_id", "track_name", "artist_name", "danceability",
-                    "energy", "valence", "tempo", "acousticness", "instrumentalness",
-                    "popularity", "display_name"):
-            setattr(t, col, getattr(r, col))
-        guest_tracks.append(t)
-
-    # 4. Guest count (including guests who haven't submitted tracks yet)
-    gc_result = await db.execute(text(
-        "SELECT COUNT(DISTINCT id) FROM guests WHERE session_id = :sid"
-    ), {"sid": session_id})
-    guest_count = gc_result.scalar() or 0
-
-    print(f"[ml_engine] guest_count={guest_count}, track_count={len(guest_tracks)}")
-
-    # 5. Try Spotify content-based filtering (requires DJ token)
-    from app.routers.dj_playlist import _session_dj_tokens
-    dj_token = _session_dj_tokens.get(str(session_id))
-
-    if dj_token:
-        result = await _spotify_recompute(
-            session_id, dj_token, genre_seeds, guest_tracks,
-            already_added_ids, guest_count, db
-        )
-        if result:
-            print(f"[ml_engine] Spotify content-based: {len(result)} recommendations")
-            return result
-
-    # 6. LLM fallback
-    print("[ml_engine] Using LLM fallback")
-    return await _llm_recompute(
-        session_id, genre_seeds, guest_tracks, already_added_text, guest_count, db
-    )

@@ -9,7 +9,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import get_db, Recommendation, Session as DBSession
@@ -88,16 +88,10 @@ async def get_recommendations(
         for r in recs
     ]
 
-    # 查询真实 guest 数量
-    guest_count_result = await db.execute(text(
-        "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
-    ), {"session_id": sid})
-    real_guest_count = guest_count_result.scalar() or 0
-
     return RecommendationsResponse(
         session_id=session_id,
         count=len(items),
-        guest_count=real_guest_count,
+        guest_count=recs[0].guest_count if recs else 0,
         is_cold_start=recs[0].is_cold_start if recs else False,
         recommendations=items,
     )
@@ -148,16 +142,10 @@ async def refresh_recommendations(
         for r in recommendations
     ]
 
-    # 查询真实 guest 数量
-    guest_count_result = await db.execute(text(
-        "SELECT COUNT(DISTINCT id) as cnt FROM guests WHERE session_id = :session_id"
-    ), {"session_id": sid})
-    real_guest_count = guest_count_result.scalar() or 0
-
     return RecommendationsResponse(
         session_id=session_id,
         count=len(items),
-        guest_count=real_guest_count,
+        guest_count=0,
         is_cold_start=is_cold,
         recommendations=items,
     )

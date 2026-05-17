@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.models.database import init_db, close_db
-from app.routers import auth, session, recommendations, guest, admin, dj_playlist
+from app.routers import auth, session, recommendations, guest, admin
 from app.services import crowd_engine
 
 
@@ -67,7 +67,7 @@ except Exception:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,7 +81,6 @@ app.include_router(session.router)
 app.include_router(recommendations.router)
 app.include_router(guest.router)
 app.include_router(admin.router)
-app.include_router(dj_playlist.router)
 
 
 # ── WebSocket ──

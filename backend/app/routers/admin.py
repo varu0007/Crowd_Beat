@@ -155,18 +155,10 @@ async def delete_guest(guest_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/tracks")
 async def list_tracks(
     guest_id: Optional[str] = Query(None),
-    session_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询歌曲列表，支持按 guest_id 或 session_id 过滤"""
-    stmt = select(GuestTrack)
-
-    if session_id:
-        try:
-            sid = uuid.UUID(session_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid session_id")
-        stmt = stmt.join(Guest, GuestTrack.guest_id == Guest.id).where(Guest.session_id == sid)
+    """查询歌曲列表，支持按 guest_id 过滤"""
+    stmt = select(GuestTrack).order_by(GuestTrack.id.desc()).limit(200)
 
     if guest_id:
         try:
@@ -174,8 +166,6 @@ async def list_tracks(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid guest_id")
         stmt = stmt.where(GuestTrack.guest_id == gid)
-        
-    stmt = stmt.order_by(GuestTrack.id.desc()).limit(200)
 
     result = await db.execute(stmt)
     tracks = result.scalars().all()
@@ -242,37 +232,4 @@ async def list_recommendations(
             "is_cold_start": r.is_cold_start,
         }
         for r in recs
-    ]
-
-# ── Playlist Tracks ──
-
-@router.get("/playlist_tracks")
-async def list_playlist_tracks(
-    session_id: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
-):
-    """查询虚拟待播歌单列表，支持按 session_id 过滤"""
-    from app.models.database import PlaylistTrack
-    stmt = select(PlaylistTrack).order_by(PlaylistTrack.added_at.desc()).limit(100)
-
-    if session_id:
-        try:
-            sid = uuid.UUID(session_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid session_id")
-        stmt = stmt.where(PlaylistTrack.session_id == sid)
-
-    result = await db.execute(stmt)
-    tracks = result.scalars().all()
-
-    return [
-        {
-            "id": t.id,
-            "session_id": str(t.session_id),
-            "spotify_track_id": t.spotify_track_id,
-            "track_name": t.track_name,
-            "artist_name": t.artist_name,
-            "added_at": t.added_at.isoformat() if t.added_at else None,
-        }
-        for t in tracks
     ]
