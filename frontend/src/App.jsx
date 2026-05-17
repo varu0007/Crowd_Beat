@@ -732,6 +732,9 @@ function CallbackHandler() {
 export default function App() {
   const location = useLocation();
   const { t, lang, switchLang, LANG_LABELS } = useI18n();
+  const hideNavLinks = ['/join', '/guest', '/guest-success', '/callback'].some(path =>
+    location.pathname === path || location.pathname.startsWith(`${path}/`)
+  );
 
   return (
     <div>
@@ -741,14 +744,16 @@ export default function App() {
           {t.brand}
         </NavLink>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div className="nav-links">
-            <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              {t.navFetcher}
-            </NavLink>
-            <NavLink to="/database" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              {t.navDatabase}
-            </NavLink>
-          </div>
+          {!hideNavLinks && (
+            <div className="nav-links">
+              <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                {t.navFetcher}
+              </NavLink>
+              <NavLink to="/database" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                {t.navDatabase}
+              </NavLink>
+            </div>
+          )}
           {/* Language Switcher */}
           <div style={{ display: 'flex', gap: '3px', border: '2px solid #FFE600', borderRadius: 0 }}>
             {Object.entries(LANG_LABELS).map(([code, label]) => (

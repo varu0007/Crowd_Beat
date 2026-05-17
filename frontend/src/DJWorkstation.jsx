@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCrowdBeatWS } from './hooks/useCrowdBeatWS';
 import { api } from './api';
@@ -20,23 +20,25 @@ export default function DJWorkstation() {
 
   const { recommendations, guestCount, isConnected } = useCrowdBeatWS(sessionId);
 
+  const addRecommendationBatch = useCallback((batch) => {
+    if (!batch || batch.length === 0) return;
+    setRecHistory(prev => {
+      if (prev.length > 0) {
+        const lastBatch = prev[prev.length - 1];
+        if (lastBatch.length === batch.length && lastBatch[0]?.spotify_track_id === batch[0]?.spotify_track_id) {
+          return prev;
+        }
+      }
+      const newHistory = [...prev, batch];
+      setHistoryIdx(newHistory.length - 1);
+      return newHistory;
+    });
+  }, []);
+
   // Keep track of recommendation history
   useEffect(() => {
-    if (recommendations && recommendations.length > 0) {
-      setRecHistory(prev => {
-        if (prev.length > 0) {
-          const lastBatch = prev[prev.length - 1];
-          // avoid duplicate consecutive batches
-          if (lastBatch.length === recommendations.length && lastBatch[0]?.spotify_track_id === recommendations[0]?.spotify_track_id) {
-            return prev;
-          }
-        }
-        const newHistory = [...prev, recommendations];
-        setHistoryIdx(newHistory.length - 1);
-        return newHistory;
-      });
-    }
-  }, [recommendations]);
+    addRecommendationBatch(recommendations);
+  }, [recommendations, addRecommendationBatch]);
 
   // Load tracks
   useEffect(() => {
@@ -60,7 +62,10 @@ export default function DJWorkstation() {
   };
 
   const handleRefresh = async () => {
-    try { await api.refreshRecommendations(sessionId); }
+    try {
+      const data = await api.refreshRecommendations(sessionId);
+      addRecommendationBatch(data.recommendations || []);
+    }
     catch (e) { alert(`Refresh failed: ${e.message}`); }
   };
 
@@ -159,8 +164,14 @@ export default function DJWorkstation() {
               </div>
             ) : (
               recHistory.map((batch, idx) => {
-                const newHits = batch.filter(r => r.spotify_track_id?.includes('_new_'));
-                const guestPicks = batch.filter(r => r.spotify_track_id?.includes('_guest_'));
+                const newHitsById = batch.filter(r => r.spotify_track_id?.includes('_new_'));
+                const guestPicksById = batch.filter(r => r.spotify_track_id?.includes('_guest_'));
+                const unclassified = batch.filter(r =>
+                  !r.spotify_track_id?.includes('_new_') && !r.spotify_track_id?.includes('_guest_')
+                );
+                const splitAt = Math.ceil(unclassified.length / 2);
+                const newHits = [...newHitsById, ...unclassified.slice(0, splitAt)];
+                const guestPicks = [...guestPicksById, ...unclassified.slice(splitAt)];
                 return (
                   <div key={idx} style={{ width: '100%', flex: '0 0 100%', padding: 24, boxSizing: 'border-box' }}>
                     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
