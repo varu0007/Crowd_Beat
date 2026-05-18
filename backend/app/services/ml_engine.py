@@ -269,8 +269,13 @@ def _rank_guest_tracks(rows) -> list[dict]:
     return ranked[:20]
 
 
-def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
+def _genre_seed_recommendations(
+    genre_seeds: list[str],
+    exclude_keys: set[tuple[str, str]] | None = None,
+) -> list[dict]:
     genre_text = " ".join(genre_seeds).lower()
+    exclude_keys = exclude_keys or set()
+
     if "electronic" in genre_text or "edm" in genre_text or "dance" in genre_text:
         picks = [
             ("Rumble", "Skrillex, Fred again.. & Flowdan"),
@@ -293,6 +298,26 @@ def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
             ("Don't You Worry Child", "Swedish House Mafia"),
             ("Clarity", "Zedd"),
             ("Summer", "Calvin Harris"),
+            ("Turn On The Lights again..", "Fred again.. & Swedish House Mafia"),
+            ("Baby again..", "Fred again.., Skrillex & Four Tet"),
+            ("Fine Day Anthem", "Skrillex & Boys Noize"),
+            ("Jungle", "Fred again.."),
+            ("Delilah (pull me out of this)", "Fred again.."),
+            ("Marea (we've lost dancing)", "Fred again.. & The Blessed Madonna"),
+            ("Eat Your Man", "Dom Dolla & Nelly Furtado"),
+            ("Take It Off", "FISHER & Aatig"),
+            ("Losing It", "FISHER"),
+            ("Drugs From Amsterdam", "Mau P"),
+            ("Metro", "Kevin de Vries & Mau P"),
+            ("Move", "Adam Port, Stryv & Malachiii"),
+            ("Mwaki", "Zerb & Sofiya Nzau"),
+            ("Pedro", "Jaxomy, Agatino Romero & Raffaella Carra"),
+            ("Tell Me Why", "Supermode"),
+            ("Innerbloom", "RUFUS DU SOL"),
+            ("On My Knees", "RUFUS DU SOL"),
+            ("Alive", "Anyma"),
+            ("Consciousness", "Anyma & Chris Avantgarde"),
+            ("The Sign", "Anyma & CamelPhat"),
         ]
     elif "hip" in genre_text or "rap" in genre_text:
         picks = [
@@ -316,6 +341,26 @@ def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
             ("Bodak Yellow", "Cardi B"),
             ("Rockstar", "Post Malone"),
             ("Hotline Bling", "Drake"),
+            ("Like That", "Future, Metro Boomin & Kendrick Lamar"),
+            ("Type Shit", "Future, Metro Boomin, Travis Scott & Playboi Carti"),
+            ("Carnival", "Kanye West, Ty Dolla $ign & Rich The Kid"),
+            ("Surround Sound", "JID"),
+            ("Jimmy Cooks", "Drake feat. 21 Savage"),
+            ("Knife Talk", "Drake feat. 21 Savage & Project Pat"),
+            ("Industry Baby", "Lil Nas X & Jack Harlow"),
+            ("Superhero", "Metro Boomin, Future & Chris Brown"),
+            ("Too Many Nights", "Metro Boomin, Don Toliver & Future"),
+            ("MELTDOWN", "Travis Scott feat. Drake"),
+            ("Sprinter", "Dave & Central Cee"),
+            ("Doja", "Central Cee"),
+            ("Just Wanna Rock", "Lil Uzi Vert"),
+            ("N95", "Kendrick Lamar"),
+            ("Family Ties", "Baby Keem & Kendrick Lamar"),
+            ("Rich Flex", "Drake & 21 Savage"),
+            ("Creepin'", "Metro Boomin, The Weeknd & 21 Savage"),
+            ("I KNOW ?", "Travis Scott"),
+            ("MY EYES", "Travis Scott"),
+            ("All My Life", "Lil Durk feat. J. Cole"),
         ]
     elif "pop" in genre_text:
         picks = [
@@ -339,6 +384,26 @@ def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
             ("Shake It Off", "Taylor Swift"),
             ("Anti-Hero", "Taylor Swift"),
             ("Good 4 U", "Olivia Rodrigo"),
+            ("Please Please Please", "Sabrina Carpenter"),
+            ("Taste", "Sabrina Carpenter"),
+            ("Illusion", "Dua Lipa"),
+            ("Dance The Night", "Dua Lipa"),
+            ("Rush", "Troye Sivan"),
+            ("One Of Your Girls", "Troye Sivan"),
+            ("vampire", "Olivia Rodrigo"),
+            ("get him back!", "Olivia Rodrigo"),
+            ("Strangers", "Kenya Grace"),
+            ("Made For Me", "Muni Long"),
+            ("Texas Hold 'Em", "Beyonce"),
+            ("Beautiful Things", "Benson Boone"),
+            ("Lose Control", "Teddy Swims"),
+            ("Stick Season", "Noah Kahan"),
+            ("Unholy", "Sam Smith & Kim Petras"),
+            ("I Ain't Worried", "OneRepublic"),
+            ("About Damn Time", "Lizzo"),
+            ("Late Night Talking", "Harry Styles"),
+            ("Satellite", "Harry Styles"),
+            ("Chemical", "Post Malone"),
         ]
     else:
         picks = [
@@ -362,17 +427,43 @@ def _genre_seed_recommendations(genre_seeds: list[str]) -> list[dict]:
             ("Shape of You", "Ed Sheeran"),
             ("Bad Guy", "Billie Eilish"),
             ("Uptown Funk", "Mark Ronson"),
+            ("Please Please Please", "Sabrina Carpenter"),
+            ("Turn On The Lights again..", "Fred again.. & Swedish House Mafia"),
+            ("Baby again..", "Fred again.., Skrillex & Four Tet"),
+            ("Rush", "Troye Sivan"),
+            ("Like That", "Future, Metro Boomin & Kendrick Lamar"),
+            ("Texas Hold 'Em", "Beyonce"),
+            ("Beautiful Things", "Benson Boone"),
+            ("Lose Control", "Teddy Swims"),
+            ("Strangers", "Kenya Grace"),
+            ("Eat Your Man", "Dom Dolla & Nelly Furtado"),
+            ("Take It Off", "FISHER & Aatig"),
+            ("Drugs From Amsterdam", "Mau P"),
+            ("Mwaki", "Zerb & Sofiya Nzau"),
+            ("Sprinter", "Dave & Central Cee"),
+            ("Industry Baby", "Lil Nas X & Jack Harlow"),
+            ("Unholy", "Sam Smith & Kim Petras"),
+            ("About Damn Time", "Lizzo"),
+            ("I Ain't Worried", "OneRepublic"),
+            ("Chemical", "Post Malone"),
+            ("Stick Season", "Noah Kahan"),
         ]
 
     results = []
-    for index, (track_name, artist_name) in enumerate(picks):
+    for track_name, artist_name in picks:
+        key = (track_name.strip().lower(), artist_name.strip().lower())
+        if key in exclude_keys:
+            continue
         digest = hashlib.md5(f"{track_name}-{artist_name}".lower().encode("utf-8")).hexdigest()[:10]
+        index = len(results)
         results.append({
             "spotify_track_id": f"seed_{digest}",
             "track_name": track_name,
             "artist_name": artist_name,
             "score": max(0.1, 1.0 - index * 0.04),
         })
+        if len(results) >= 20:
+            break
     return results
 
 
@@ -536,7 +627,7 @@ async def recompute(
         that would show users songs they already know and own.
         """
         print("[recommendations] using genre-seed fallback (Gemini unavailable)")
-        seeded = _genre_seed_recommendations(genre_seeds)
+        seeded = _genre_seed_recommendations(genre_seeds, exclude_keys=playlist_keys)
         return await _save_ranked_tracks(
             session_id=session_id,
             top_n=seeded,
@@ -737,7 +828,7 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
     except Exception as e:
         print(f"[Gemini Recommendation Error] Cold Start: {e}")
         # Always fall back to curated genre seeds — never return the guest's own submitted tracks
-        seeded = _genre_seed_recommendations(genre_seeds)
+        seeded = _genre_seed_recommendations(genre_seeds, exclude_keys=playlist_keys)
         return await _save_ranked_tracks(session_id, seeded, db, guest_count, is_cold_start=True)
 
     # Build exclusion set from existing_tracks so Gemini's guest_picks
@@ -761,7 +852,7 @@ Use only the keys new_hits, guest_picks, track_name, artist_name, and reason."""
 
     if not filtered_data:
         print("[cold_start] all LLM results matched guest tracks, using genre seeds")
-        seeded = _genre_seed_recommendations(genre_seeds)
+        seeded = _genre_seed_recommendations(genre_seeds, exclude_keys=playlist_keys)
         return await _save_ranked_tracks(session_id, seeded, db, guest_count, is_cold_start=True)
 
     top_n = []
