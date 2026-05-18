@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useCrowdBeatWS } from './hooks/useCrowdBeatWS';
 import { api } from './api';
 import { useI18n } from './i18n';
-import { Mic, CheckCircle2, XCircle, Headphones } from 'lucide-react';
+import { Mic, CheckCircle2, XCircle, Headphones, RefreshCw } from 'lucide-react';
 
 export default function DJWorkstation() {
   const { t } = useI18n();
@@ -17,6 +17,8 @@ export default function DJWorkstation() {
 
   const [recHistory, setRecHistory] = useState([]);
   const [historyIdx, setHistoryIdx] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
 
   const { recommendations, guestCount, isConnected } = useCrowdBeatWS(sessionId);
 
@@ -62,11 +64,16 @@ export default function DJWorkstation() {
   };
 
   const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setError(null);
     try {
       const data = await api.refreshRecommendations(sessionId);
       addRecommendationBatch(data.recommendations || [], { force: true });
+      setLastRefreshedAt(new Date());
     }
-    catch (e) { alert(`Refresh failed: ${e.message}`); }
+    catch (e) { setError(`Refresh failed: ${e.message}`); }
+    finally { setIsRefreshing(false); }
   };
 
   // Track add button
@@ -144,7 +151,34 @@ export default function DJWorkstation() {
             )}
             <span><Mic size={16} style={{ display: 'inline', verticalAlign: 'text-bottom' }} /> {guestCount} {t.guestsCountLabel}</span>
             <span>{isConnected ? <CheckCircle2 size={16} color="#00A859" style={{ display: 'inline', verticalAlign: 'text-bottom' }} /> : <XCircle size={16} color="#FF4C4C" style={{ display: 'inline', verticalAlign: 'text-bottom' }} />}</span>
-            <button className="nb-btn nb-btn--small nb-btn--ghost" onClick={handleRefresh} style={{ padding: '4px 12px' }}>{t.dbRefresh}</button>
+            <button
+              className="nb-btn nb-btn--small nb-btn--ghost"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              style={{
+                padding: '4px 12px',
+                opacity: isRefreshing ? 0.75 : 1,
+                cursor: isRefreshing ? 'wait' : 'pointer',
+                minWidth: 126,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+            >
+              <RefreshCw
+                size={16}
+                style={{
+                  animation: isRefreshing ? 'spin 0.8s linear infinite' : 'none',
+                }}
+              />
+              {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            {lastRefreshedAt && !isRefreshing && (
+              <span style={{ color: '#aaa', fontSize: '0.75rem' }}>
+                Updated {lastRefreshedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
           </div>
         </div>
 
