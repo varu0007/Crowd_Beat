@@ -13,6 +13,7 @@ export default function DJWorkstation() {
   const [djConnected, setDjConnected] = useState(false);
   const [addedTracks, setAddedTracks] = useState(new Set());
   const [playlistTracks, setPlaylistTracks] = useState([]);
+  const [guestWishTracks, setGuestWishTracks] = useState([]);
   const [error, setError] = useState(null);
 
   const [recHistory, setRecHistory] = useState([]);
@@ -51,6 +52,14 @@ export default function DJWorkstation() {
       }
     }).catch(() => {});
   }, [sessionId]);
+
+  // Load the tracks guests explicitly selected as their wishes.
+  useEffect(() => {
+    if (!sessionId) return;
+    api.admin.getTracks(null, sessionId).then(tracks => {
+      setGuestWishTracks(Array.isArray(tracks) ? tracks : []);
+    }).catch(() => {});
+  }, [sessionId, guestCount]);
 
 
   const handleAddTrack = async (track) => {
@@ -206,6 +215,7 @@ export default function DJWorkstation() {
                 const splitAt = Math.ceil(unclassified.length / 2);
                 const newHits = [...newHitsById, ...unclassified.slice(0, splitAt)];
                 const guestPicks = [...guestPicksById, ...unclassified.slice(splitAt)];
+                const displayedGuestPicks = guestWishTracks.length > 0 ? guestWishTracks : guestPicks;
                 return (
                   <div key={idx} style={{ width: '100%', flex: '0 0 100%', padding: 24, boxSizing: 'border-box' }}>
                     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
@@ -216,8 +226,8 @@ export default function DJWorkstation() {
                       </div>
                       <div style={{ flex: '1 1 300px', minWidth: 0 }}>
                         <h4 style={{ fontSize: '1.1rem', fontWeight: 900, marginBottom: 14, borderBottom: '3px solid #000', paddingBottom: 8 }}>{t.guestWishes}</h4>
-                        {guestPicks.map((tr, i) => <TrackRow key={tr.spotify_track_id + i} track={tr} idx={i} bg="#E8F5E9" />)}
-                        {guestPicks.length === 0 && <div style={{ color: '#888', fontWeight: 600 }}>{t.noGuestWishes}</div>}
+                        {displayedGuestPicks.map((tr, i) => <TrackRow key={tr.spotify_track_id + i} track={tr} idx={i} bg="#E8F5E9" />)}
+                        {displayedGuestPicks.length === 0 && <div style={{ color: '#888', fontWeight: 600 }}>{t.noGuestWishes}</div>}
                       </div>
                     </div>
                   </div>
